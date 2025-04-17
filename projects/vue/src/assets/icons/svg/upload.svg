@@ -1,0 +1,18 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+        "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="37" height="36" viewBox="0 0 37 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <g id="Frame">
+        <path id="Vector"
+              d="M9.25828 15.2031C5.95607 15.9884 3.5 18.9573 3.5 22.4999C3.5 26.642 6.85786 29.9999 11 29.9999C11.7106 29.9999 12.398 29.9011 13.0494 29.7165"
+              stroke="#121316" stroke-opacity="0.8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="Vector_2"
+              d="M27.541 15.2031C30.8432 15.9884 33.2993 18.9573 33.2993 22.4999C33.2993 26.642 29.9414 29.9999 25.7993 29.9999C25.0887 29.9999 24.4013 29.9011 23.7499 29.7165"
+              stroke="#121316" stroke-opacity="0.8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="Vector_3" d="M27.5 15C27.5 10.0295 23.4705 6 18.5 6C13.5295 6 9.5 10.0295 9.5 15" stroke="#121316"
+              stroke-opacity="0.8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="Vector_4" d="M13.2991 20.9109L18.4999 15.6929L23.8489 21.0002" stroke="#121316" stroke-opacity="0.8"
+              stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path id="Vector_5" d="M18.5 28.5001V18.3464" stroke="#121316" stroke-opacity="0.8" stroke-width="3"
+              stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+</svg>
