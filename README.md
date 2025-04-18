@@ -1,8 +1,7 @@
 # 基于知识图谱的笔记系统
 
 ## 项目展示
-
-
+https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 
 
 ### 技术栈
