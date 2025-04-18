@@ -40,11 +40,10 @@ class StoreTool:
                 "file": kg_manager.file,
                 "operation_type": "add",
                 "text_snippet": text[:50],
-                "bolt_count": bolt_count
+                "bolt_count": bolt_count,
+                "original_file_type": kg_manager.original_file_type  # 存储原始文件名
             }
             metadatas.append(entry_metadata)
-
-
 
         self.vector_collection.upsert(
             ids=[bid for bid,text in kg_manager.Bolts],
@@ -66,7 +65,8 @@ class StoreTool:
                 "label_to_entities": dict(kg_manager.bidirectional_mapping["label_to_entities"])
             }),
             "current_G": json.dumps(graph_data),
-            "Bolts": json.dumps(kg_manager.Bolts)
+            "Bolts": json.dumps(kg_manager.Bolts),
+            "original_file_type": kg_manager.original_file_type  # 存储原始文件名
         }
 
         # 使用文件名作为ID，存入集合
@@ -94,7 +94,8 @@ class StoreTool:
                                                  json.loads(metadata["bidirectional_mapping"])["label_to_entities"])
             },
             "current_G": nx.node_link_graph(json.loads(metadata["current_G"])),
-            "Bolts": json.loads(metadata["Bolts"])
+            "Bolts": json.loads(metadata["Bolts"]),
+            "original_file_type": metadata.get("original_file_type", filename)  # 使用原始文件名
         }
 
     def delete_states(self, filenames: list):

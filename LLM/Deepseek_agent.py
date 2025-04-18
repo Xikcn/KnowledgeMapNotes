@@ -89,7 +89,6 @@ class DeepSeekAgent:
         return output
 
     def hybrid_rag(self, query, graph, vectors, messages):
-        print(messages, 'hybrid_rag89')
         prompt = open("./prompt/v2/rag_v1_hybrid.txt", encoding='utf-8').read()
         input_parameter = open("./prompt/v2/rag_v1_query_hy.txt", encoding='utf-8').read()
         graph_relation = "\n".join(graph)

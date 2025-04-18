@@ -16,6 +16,8 @@ class KgManager:
         self.embeddings = embedding_model
         # 文件名
         self.file = ""
+        # 原始文件类型
+        self.original_file_type = ""
         # 当前 文本块bid-对应的关系的表
         self.kg_triplet = []
         # 当前 实体-实体标签映射表
@@ -36,6 +38,7 @@ class KgManager:
             self.bidirectional_mapping = default_data['bidirectional_mapping']
             self.current_G = default_data['current_G']
             self.Bolts = default_data['Bolts']
+            self.original_file_type = default_data.get('original_file_type', '.txt')
         else:
             return None
 
@@ -521,6 +524,7 @@ class KgManager:
                 self.bidirectional_mapping = state["bidirectional_mapping"]
                 self.current_G = state["current_G"]
                 self.Bolts = state["Bolts"]
+                self.original_file_type = state.get('original_file_type', '.txt')
                 return True
         return False
 

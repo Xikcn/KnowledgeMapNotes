@@ -31,7 +31,7 @@ const panelVisible = reactive({
 
 // RAG聊天相关
 const chatMessages = ref([
-  { role: 'system', content: '我是基于当前文档的RAG助手，可以回答与文档相关的问题。' }
+  { role: 'system', content: '我是基于当前文档的HybridRAG助手，可以回答与文档相关的问题。' }
 ]);
 const userInput = ref('');
 const chatLoading = ref(false);
@@ -62,6 +62,11 @@ const changeTheme = (theme) => {
 
 // 获取知识图谱数据
 const fetchKnowledgeGraph = async (filename) => {
+  if (!filename) {
+    console.error('文件名不能为空');
+    return;
+  }
+
   try {
     knowledgeGraphLoading.value = true;
 
@@ -93,20 +98,23 @@ onMounted(async () => {
     // 初始化主题
     const savedTheme = localStorage.getItem('app-theme') || 'default';
     changeTheme(savedTheme);
-    
+
     const response = await axios.get('http://localhost:8000/list-files');
     if (response.data && Array.isArray(response.data.files)) {
-      // 将历史文件添加到文件列表
+      // 将历史文件添加到文件列表，保持原始文件名
       uploadFileList.value = response.data.files.map(file => ({
-        name: file.filename || file.name || file, // 使用文件名
-        status: file.status || 'success',
+        name: file.filename || file.name || file,  // 保持原始文件名
+        status: file.status || 'completed',
         size: file.size || 0,
         percentage: 100
       }));
 
-      // 检查是否有未完成的文件，如果有则开始监控
+      // 初始化过滤后的文件列表
+      filteredFileList.value = [...uploadFileList.value];
+
+      // 检查是否有未完成的文件
       uploadFileList.value.forEach(file => {
-        if (file.status === 'processing' || file.status === 'pending') {
+        if (file.status === 'processing' || file.status === 'uploading') {
           checkFileProcessingStatus(file);
         }
       });
@@ -122,7 +130,7 @@ const deleteFile = async (file) => {
   try {
     // 添加确认弹窗
     await ElMessageBox.confirm(
-      `确定要删除文件 ${file.name} 吗？此操作将同时删除相关的聊天记录。`,
+      `确定要删除文件 ${file.name} 吗？此操作将同时删除相关的聊天记录和知识图谱。`,
       '删除确认',
       {
         confirmButtonText: '确定',
@@ -132,23 +140,23 @@ const deleteFile = async (file) => {
     );
 
     await axios.delete(`http://localhost:8000/delete/${file.name}`);
-    
+
     // 从列表中移除文件
     const index = uploadFileList.value.findIndex(item => item.name === file.name);
     if (index !== -1) {
       uploadFileList.value.splice(index, 1);
     }
-    
+
     // 清理本地缓存
-    localStorage.removeItem(`kg_${file.name}`);
+    localStorage.removeItem(`kg_${file.name}`);  // 删除知识图谱数据
     localStorage.removeItem(`chat_${file.name}`);  // 删除聊天记录
-    
-    ElMessage.success(`文件 ${file.name} 已删除`);
 
     // 如果删除的是当前查看的文件，关闭结果视图
     if (currentFile.value && currentFile.value.name === file.name) {
       closeResultView();
     }
+
+    ElMessage.success(`文件 ${file.name} 已删除`);
   } catch (error) {
     if (error !== 'cancel') {  // 如果不是用户取消操作
       console.error('删除文件失败:', error);
@@ -160,6 +168,12 @@ const deleteFile = async (file) => {
 // 修改RAG请求函数
 const sendMessage = async () => {
   if (!userInput.value.trim() || chatLoading.value) return;
+
+  // 首先检查是否有选中的文件
+  if (!currentFile.value?.name) {
+    ElMessage.error('请先选择一个文件');
+    return;
+  }
 
   chatMessages.value.push({ role: 'user', content: userInput.value });
   const currentQuestion = userInput.value;
@@ -173,11 +187,10 @@ const sendMessage = async () => {
     const historyMessages = chatMessages.value
       .filter(msg => !msg.thinking && msg.role !== 'system')
       .map(msg => {
-        // 如果是助手的回复，且内容是对象，则只保留文本内容
         if (msg.role === 'assistant' && typeof msg.content === 'object') {
           return {
             role: msg.role,
-            content: Array.isArray(msg.content.answer) 
+            content: Array.isArray(msg.content.answer)
               ? msg.content.answer.join('\n')
               : msg.content.answer
           };
@@ -192,9 +205,14 @@ const sendMessage = async () => {
       request: currentQuestion,
       model: 'deepseek',
       flow: false,
-      filename: currentFile.value?.name,
+      filename: currentFile.value.name,
       messages: historyMessages
     });
+
+    // 检查响应是否有效
+    if (!response || !response.data) {
+      throw new Error('服务器响应无效');
+    }
 
     // 检查响应状态
     if (response.data.status === 'processing') {
@@ -207,11 +225,19 @@ const sendMessage = async () => {
       return;
     }
 
+    // 检查结果是否存在
+    if (!response.data.result) {
+      throw new Error('服务器返回结果为空');
+    }
+
     const thinkingIndex = chatMessages.value.findIndex(msg => msg.thinking);
     if (thinkingIndex !== -1) {
       chatMessages.value[thinkingIndex] = {
         role: 'assistant',
-        content: response.data.result
+        content: {
+          answer: response.data.result.answer,
+          material: response.data.result.material
+        }
       };
     }
 
@@ -223,8 +249,14 @@ const sendMessage = async () => {
   } catch (error) {
     console.error('获取RAG回复失败:', error);
     chatMessages.value = chatMessages.value.filter(msg => !msg.thinking);
-    if (error.response && error.response.status === 422) {
-      ElMessage.error('请求参数错误：' + (error.response.data.detail?.[0]?.msg || '未知错误'));
+    if (error.response) {
+      if (error.response.status === 422) {
+        ElMessage.error('请求参数错误：' + (error.response.data.detail?.[0]?.msg || '未知错误'));
+      } else {
+        ElMessage.error(`服务器错误: ${error.response.status} - ${error.response.data?.message || '未知错误'}`);
+      }
+    } else if (error.message) {
+      ElMessage.error(error.message);
     } else {
       ElMessage.error('获取回复失败，请稍后重试');
     }
@@ -253,7 +285,7 @@ const closeFileList = () => {
 const beforeUpload = (file) => {
   const fileObj = {
     uid: Date.now(),
-    name: file.name,
+    name: file.name,  // 保持原始文件名（包含后缀）
     status: 'uploading',
     size: file.size,
     percentage: 0
@@ -278,26 +310,27 @@ const onUploadSuccess = (response, file) => {
     targetFile.percentage = 100;
     targetFile.resultId = response.resultId || Date.now();
 
-    // 这里可以添加轮询检查文件处理状态的逻辑
+    // 开始检查处理状态
     checkFileProcessingStatus(targetFile);
   }
 }
 
 // 添加检查文件处理状态的函数
 const checkFileProcessingStatus = (file) => {
-  if (!file || !file.resultId) return;
+  if (!file) return;
 
   // 创建定时器，每3秒检查一次处理状态
   const checkStatus = async () => {
     try {
-      const response = await axios.get(`/api/processing-status/${file.name}`);
+      // 修改为正确的API路径
+      const response = await axios.get(`http://localhost:8000/processing-status/${file.name}`);
 
       if (response.data && response.data.status) {
         const status = response.data.status;
 
         if (status === 'completed') {
           // 处理完成
-          file.status = 'success';
+          file.status = 'completed';  // 使用 completed 而不是 success
           ElMessage.success(`文件 ${file.name} 处理完成`);
           return; // 停止检查
         } else if (status.startsWith('error')) {
@@ -309,7 +342,7 @@ const checkFileProcessingStatus = (file) => {
         // 如果仍在处理中，继续轮询
         setTimeout(checkStatus, 3000);
       } else {
-        // 状态未知，可能是服务器问题
+        // 状态未知，继续轮询
         setTimeout(checkStatus, 3000);
       }
     } catch (error) {
@@ -321,7 +354,7 @@ const checkFileProcessingStatus = (file) => {
 
   // 开始检查
   setTimeout(checkStatus, 2000);
-}
+};
 
 const onUploadError = (error, file) => {
   const targetFile = uploadFileList.value.find(item => item.name === file.name);
@@ -333,19 +366,31 @@ const onUploadError = (error, file) => {
 
 // 查看文件结果
 const viewFileResult = async (file) => {
-  if (file.status === 'success') {
+  if (file.status === 'completed') {
     try {
       activeView.value = 'result';
       currentFile.value = file;
 
-      // 加载文件内容
       fileContentLoading.value = true;
       fileContent.value = '';
 
+      if (!file.name) {
+        ElMessage.error('文件名不存在');
+        return;
+      }
+
       try {
-        const response = await axios.get(`http://localhost:8000/file-content/${file.name}`);
-        if (response.data && response.data.content) {
-          fileContent.value = response.data.content;
+        const [contentResponse] = await Promise.all([
+          // 使用原始文件名获取内容
+          axios.get(`http://localhost:8000/file-content/${file.name}`).catch(error => {
+            console.error('获取文件内容失败:', error);
+            return { data: { content: '' } };
+          }),
+          fetchKnowledgeGraph(file.name)  // 使用原始文件名获取知识图谱
+        ]);
+
+        if (contentResponse.data && contentResponse.data.content) {
+          fileContent.value = contentResponse.data.content;
         }
       } catch (error) {
         console.error('获取文件内容失败:', error);
@@ -354,16 +399,13 @@ const viewFileResult = async (file) => {
         fileContentLoading.value = false;
       }
 
-      // 加载知识图谱数据
-      await fetchKnowledgeGraph(file.name);
-
-      // 加载聊天记录
+      // 加载聊天记录时使用原始文件名
       const savedChat = localStorage.getItem(`chat_${file.name}`);
       if (savedChat) {
         chatMessages.value = JSON.parse(savedChat);
       } else {
         chatMessages.value = [
-          { role: 'system', content: '我是基于当前文档的RAG助手，可以回答与文档相关的问题。' }
+          { role: 'system', content: '我是基于当前文档的HybridRAG助手，可以回答与文档相关的问题。' }
         ];
       }
     } catch (error) {
@@ -382,7 +424,7 @@ const closeResultView = () => {
   activeView.value = 'upload';
   knowledgeGraphData.value = null;
   chatMessages.value = [
-    { role: 'system', content: '我是基于当前文档的RAG助手，可以回答与文档相关的问题。' }
+    { role: 'system', content: '我是基于当前文档的HybridRAG助手，可以回答与文档相关的问题。' }
   ];
 }
 
@@ -420,23 +462,23 @@ const switchTab = (tab) => {
   }
 };
 
-const getFileIcon = (status) => {
-  switch(status) {
-    case 'uploading': return Loading;
-    case 'processing': return Loading;
-    case 'success': return SuccessFilled;
-    case 'error': return Document;
-    default: return Document;
-  }
-}
-
 const getStatusText = (status) => {
   switch(status) {
     case 'uploading': return '上传中';
     case 'processing': return '处理中';
-    case 'success': return '已完成';
+    case 'completed': return '已完成';
     case 'error': return '失败';
     default: return '未知';
+  }
+}
+
+const getFileIcon = (status) => {
+  switch(status) {
+    case 'uploading': return Loading;
+    case 'processing': return Loading;
+    case 'completed': return SuccessFilled;
+    case 'error': return Document;
+    default: return Document;
   }
 }
 
@@ -447,26 +489,90 @@ const reloadKnowledgeGraph = () => {
   }
 };
 
-// 添加搜索处理函数
-const handleSearch = () => {
-  if (!searchValue.value) {
-    filteredFileList.value = uploadFileList.value;
-    return;
+// 添加筛选相关的状态
+const fileTypeFilter = ref('all');
+const statusFilter = ref('all');
+
+// 文件类型选项
+const fileTypeOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'txt', label: 'TXT' },
+  { value: 'pdf', label: 'PDF' },
+  { value: 'docx', label: 'WORD' }
+];
+
+// 状态选项
+const statusOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'uploading', label: '上传中' },
+  { value: 'processing', label: '处理中' },
+  { value: 'completed', label: '已完成' },
+  { value: 'error', label: '失败' }
+];
+
+// 添加临时筛选状态
+const tempFileTypeFilter = ref('all');
+const tempStatusFilter = ref('all');
+
+// 添加筛选框显示控制
+const filterVisible = ref(false);
+
+// 修改筛选处理函数
+const handleFilter = () => {
+  let filtered = uploadFileList.value;
+
+  // 应用搜索过滤
+  if (searchValue.value) {
+    const searchText = searchValue.value.toLowerCase();
+    filtered = filtered.filter(file =>
+      file.name.toLowerCase().includes(searchText)
+    );
   }
-  const searchText = searchValue.value.toLowerCase();
-  filteredFileList.value = uploadFileList.value.filter(file => 
-    file.name.toLowerCase().includes(searchText)
-  );
+
+  // 应用类型过滤
+  if (fileTypeFilter.value !== 'all') {
+    filtered = filtered.filter(file => {
+      const ext = file.name.split('.').pop().toLowerCase();
+      return ext === fileTypeFilter.value;
+    });
+  }
+
+  // 应用状态过滤
+  if (statusFilter.value !== 'all') {
+    filtered = filtered.filter(file =>
+      file.status === statusFilter.value
+    );
+  }
+
+  filteredFileList.value = filtered;
 };
 
-// 监听搜索值变化
-watch(searchValue, () => {
-  handleSearch();
-});
+// 修改确认筛选函数
+const confirmFilter = () => {
+  fileTypeFilter.value = tempFileTypeFilter.value;
+  statusFilter.value = tempStatusFilter.value;
+  handleFilter();
+  filterVisible.value = false;  // 关闭筛选框
+};
+
+// 修改重置筛选函数
+const resetFilter = () => {
+  tempFileTypeFilter.value = 'all';
+  tempStatusFilter.value = 'all';
+  fileTypeFilter.value = 'all';
+  statusFilter.value = 'all';
+  handleFilter();
+  filterVisible.value = false;  // 关闭筛选框
+};
+
+// 监听筛选条件变化
+watch([searchValue, fileTypeFilter, statusFilter], () => {
+  handleFilter();
+}, { deep: true });
 
 // 监听文件列表变化
 watch(uploadFileList, () => {
-  handleSearch();
+  handleFilter();
 }, { deep: true });
 
 // 添加关闭所有视图的处理函数
@@ -474,12 +580,15 @@ const handleCloseAll = () => {
   closeResultView();
   fileListExpand.value = false;
 };
+
+// 添加当前选中文件的ID
+const currentFileId = ref(null);
 </script>
 
 <template>
   <div class="main-container">
-    <side-bar 
-      ref="sideBarRef" 
+    <side-bar
+      ref="sideBarRef"
       v-model:fileListExpand="fileListExpand"
       @closeAll="handleCloseAll"
     />
@@ -496,8 +605,15 @@ const handleCloseAll = () => {
         </template>
         <template #default>
           <div v-if="!isSearch" class="query-button">
-            <el-popover :show-arrow="false" placement="top-end" popper-class="custom-popover" trigger="click"
-                        :show-after="200" popper-style="width:360px">
+            <el-popover
+              v-model:visible="filterVisible"
+              :show-arrow="false"
+              placement="top-end"
+              popper-class="custom-popover"
+              trigger="click"
+              :show-after="200"
+              popper-style="width:360px"
+            >
               <template #reference>
                 <div class="filter">
                   <svg-icon icon-name="filter" size="16px"/>
@@ -505,15 +621,40 @@ const handleCloseAll = () => {
                 </div>
               </template>
               <template #default>
-                <div class="history-header">类型</div>
+                <div class="filter-content">
+                  <div class="filter-section">
+                    <div class="filter-title">类型</div>
+                    <div class="filter-options">
+                      <el-radio-group v-model="tempFileTypeFilter" size="small">
+                        <template v-for="option in fileTypeOptions" :key="option.value">
+                          <el-radio-button :value="option.value">{{ option.label }}</el-radio-button>
+                        </template>
+                      </el-radio-group>
+                    </div>
+                  </div>
+                  <div class="filter-section">
+                    <div class="filter-title">状态</div>
+                    <div class="filter-options">
+                      <el-radio-group v-model="tempStatusFilter" size="small">
+                        <template v-for="option in statusOptions" :key="option.value">
+                          <el-radio-button :value="option.value">{{ option.label }}</el-radio-button>
+                        </template>
+                      </el-radio-group>
+                    </div>
+                  </div>
+                  <div class="filter-actions">
+                    <el-button size="small" @click="resetFilter">重置</el-button>
+                    <el-button type="primary" size="small" @click="confirmFilter">确认</el-button>
+                  </div>
+                </div>
               </template>
             </el-popover>
             <svg-icon icon-name="search" icon-class="search-icon" size="18px" @click="isSearch=true"/>
           </div>
           <div v-else class="search-input">
-            <el-input 
-              v-model="searchValue" 
-              placeholder="请输入文件名称" 
+            <el-input
+              v-model="searchValue"
+              placeholder="请输入文件名称"
               clearable
               @input="handleSearch"
             />
@@ -522,18 +663,30 @@ const handleCloseAll = () => {
           <div class="file-list">
             <template v-if="filteredFileList.length > 0">
               <div
-                  v-for="file in filteredFileList"
-                  :key="file.name"
-                  class="file-item"
-                  :class="{'can-click': file.status === 'success'}"
-                  @dblclick="viewFileResult(file)"
+                v-for="file in filteredFileList"
+                :key="file.name"
+                class="file-item"
+                :class="{
+                  'can-click': file.status === 'completed',
+                  'active': currentFile?.name === file.name
+                }"
+                @dblclick="viewFileResult(file)"
+                @mouseenter="currentFileId = file.name"
+                @mouseleave="currentFileId = null"
               >
                 <div class="file-info">
                   <el-icon class="file-icon" :class="file.status">
                     <component :is="getFileIcon(file.status)" />
                   </el-icon>
                   <div class="file-name-container">
-                    <div class="file-name">{{ file.name }}</div>
+                    <el-tooltip
+                      :content="file.name"
+                      placement="right"
+                      :show-after="500"
+                      :hide-after="0"
+                    >
+                      <div class="file-name">{{ file.name }}</div>
+                    </el-tooltip>
                     <div v-if="file.status === 'uploading'" class="file-progress">
                       <el-progress :percentage="file.percentage" :show-text="false" :stroke-width="2" />
                     </div>
@@ -543,21 +696,23 @@ const handleCloseAll = () => {
                   <div class="file-status" :class="file.status">
                     {{ getStatusText(file.status) }}
                   </div>
-                  <el-button
-                    v-if="file.status === 'success'"
-                    type="danger"
-                    link
-                    @click.stop="deleteFile(file)"
-                  >
-                    删除
-                  </el-button>
+                  <transition name="fade">
+                    <div v-if="currentFileId === file.name && file.status === 'completed'" class="delete-action">
+                      <img
+                        src="@/assets/icons/svg/delete.svg"
+                        alt="删除"
+                        class="delete-icon"
+                        @click.stop="deleteFile(file)"
+                      />
+                    </div>
+                  </transition>
                 </div>
               </div>
             </template>
             <el-empty v-else description="暂无文件" />
           </div>
-          <div class="pagination" v-if="uploadFileList.length > 0">
-            <el-pagination :total="uploadFileList.length" size="small" layout="prev, pager, next" background />
+          <div class="pagination" v-if="filteredFileList.length > 0">
+            <el-pagination :total="filteredFileList.length" size="small" layout="prev, pager, next" background />
           </div>
         </template>
       </el-drawer>
@@ -725,7 +880,18 @@ const handleCloseAll = () => {
                         <div v-if="message.thinking" class="thinking-indicator">
                           <span></span><span></span><span></span>
                         </div>
-                        <div v-else>{{ message.content }}</div>
+                        <div v-else>
+                          <template v-if="typeof message.content === 'object'">
+                            <div class="answer">{{ Array.isArray(message.content.answer) ? message.content.answer.join('') : message.content.answer }}</div>
+                            <div v-if="message.content.material && message.content.material.length > 0" class="material">
+                              <div class="material-title">参考资料：</div>
+                              <div class="material-content">{{ message.content.material }}</div>
+                            </div>
+                          </template>
+                          <template v-else>
+                            {{ message.content }}
+                          </template>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -756,8 +922,8 @@ const handleCloseAll = () => {
           <template #default>
             <div class="theme-header">主题设置</div>
             <div class="theme-content">
-              <div 
-                v-for="theme in themeOptions" 
+              <div
+                v-for="theme in themeOptions"
                 :key="theme.value"
                 class="theme-item"
                 :class="{ active: currentTheme === theme.value }"
@@ -908,20 +1074,53 @@ const handleCloseAll = () => {
             border-radius: 8px;
             margin-bottom: 8px;
             background-color: var(--el-fill-color-lighter);
-            transition: all 0.3s;
+            transition: all 0.3s ease;
             user-select: none;
+            border: 1px solid transparent;
 
-            .file-actions {
-              display: flex;
-              align-items: center;
-              gap: 8px;
+            &.active {
+              background-color: var(--el-bg-color) !important;
+              border-color: var(--el-border-color-light);
+            }
+
+            &:hover {
+              background-color: var(--el-fill-color-dark);
             }
 
             &.can-click {
               cursor: pointer;
 
               &:hover {
-                background-color: var(--el-fill-color-dark) !important;
+                transform: translateY(-1px);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+              }
+
+              &.active {
+                background-color: var(--el-bg-color) !important;
+                border-color: var(--el-color-primary-light-3);
+              }
+            }
+
+            .file-actions {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+
+              .delete-action {
+                .delete-icon {
+                  cursor: pointer;
+                  width: 16px;
+                  height: 16px;
+                  padding: 4px;
+                  border-radius: 4px;
+                  transition: all 0.3s ease;
+                  opacity: 0.6;
+
+                  &:hover {
+                    opacity: 1;
+                    background-color: var(--el-color-danger-light-9);
+                  }
+                }
               }
             }
 
@@ -929,29 +1128,30 @@ const handleCloseAll = () => {
               display: flex;
               align-items: center;
               flex: 1;
-              overflow: hidden;
+              min-width: 0; // 防止子元素溢出
 
               .file-icon {
                 margin-right: 12px;
                 font-size: 20px;
+                flex-shrink: 0;
 
                 &.uploading, &.processing {
-                  color: var(--el-color-primary-light-3);
+                  color: var(--el-color-primary);
                   animation: spin 1.5s infinite linear;
                 }
 
-                &.success {
-                  color: var(--el-color-success-light-3);
+                &.completed {
+                  color: var(--el-color-success);
                 }
 
                 &.error {
-                  color: var(--el-color-danger-light-3);
+                  color: var(--el-color-danger);
                 }
               }
 
               .file-name-container {
                 flex: 1;
-                overflow: hidden;
+                min-width: 0; // 防止子元素溢出
 
                 .file-name {
                   white-space: nowrap;
@@ -960,12 +1160,11 @@ const handleCloseAll = () => {
                   margin-bottom: 4px;
                   color: var(--el-text-color-primary);
                   font-weight: 500;
-                  user-select: none;
+                  max-width: 100%;
                 }
 
                 .file-progress {
                   width: 100%;
-                  background-color: var(--el-fill-color-darker);
                 }
               }
             }
@@ -973,19 +1172,18 @@ const handleCloseAll = () => {
             .file-status {
               font-size: 12px;
               white-space: nowrap;
-              margin-left: 8px;
-              user-select: none;
+              flex-shrink: 0;
 
               &.uploading, &.processing {
-                color: var(--el-color-primary-light-3);
+                color: var(--el-color-primary);
               }
 
-              &.success {
-                color: var(--el-color-success-light-3);
+              &.completed {
+                color: var(--el-color-success);
               }
 
               &.error {
-                color: var(--el-color-danger-light-3);
+                color: var(--el-color-danger);
               }
             }
           }
@@ -1244,20 +1442,20 @@ const handleCloseAll = () => {
                     background-color: var(--el-color-primary);
                     border-color: var(--el-color-primary);
                     color: #ffffff;
-                    
+
                     &:hover {
                       background-color: var(--el-color-primary-light-3);
                       border-color: var(--el-color-primary-light-3);
                     }
                   }
                 }
-                
+
                 &.el-button--default {
                   &:not(.is-disabled) {
                     background-color: var(--el-fill-color-light);
                     border-color: var(--el-border-color);
                     color: var(--el-text-color-primary);
-                    
+
                     &:hover {
                       color: var(--el-color-primary);
                       border-color: var(--el-color-primary);
@@ -1344,7 +1542,7 @@ const handleCloseAll = () => {
                         background-color: var(--chat-assistant-bubble-bg, var(--el-fill-color-light));
                         color: var(--chat-assistant-bubble-text, var(--el-text-color-primary));
                         border-radius: 12px 12px 12px 0;
-                        
+
                         &.thinking {
                           padding: 12px 20px;
                         }
@@ -1402,6 +1600,31 @@ const handleCloseAll = () => {
                           }
                         }
                       }
+
+                      .answer {
+                        margin-bottom: 8px;
+                        line-height: 1.6;
+                      }
+
+                      .material {
+                        margin-top: 12px;
+                        padding: 8px 12px;
+                        background-color: var(--el-fill-color-light);
+                        border-radius: 6px;
+
+                        .material-title {
+                          font-size: 12px;
+                          color: var(--el-text-color-secondary);
+                          margin-bottom: 4px;
+                        }
+
+                        .material-content {
+                          font-size: 13px;
+                          color: var(--el-text-color-regular);
+                          line-height: 1.5;
+                          white-space: pre-wrap;
+                        }
+                      }
                     }
                   }
                 }
@@ -1417,11 +1640,11 @@ const handleCloseAll = () => {
                       background-color: var(--el-fill-color-dark);
                       border-color: var(--el-border-color);
                       color: var(--el-text-color-primary);
-                      
+
                       &:hover {
                         border-color: var(--el-border-color-darker);
                       }
-                      
+
                       &:focus {
                         border-color: var(--el-color-primary);
                         background-color: var(--el-fill-color-darker);
@@ -1599,79 +1822,214 @@ const handleCloseAll = () => {
 .theme-content {
   padding: 0 16px;
   margin-bottom: 16px;
-}
 
-.theme-item {
-  display: flex;
-  align-items: center;
-  padding: 8px;
-  cursor: pointer;
-  border-radius: 6px;
-  margin-bottom: 8px;
-  transition: all 0.3s;
-
-  &:hover {
-    background-color: var(--el-fill-color-light);
-  }
-
-  &.active {
-    background-color: var(--el-fill-color-light);
-  }
-
-  .theme-preview {
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    margin-right: 12px;
-    border: 1px solid var(--el-border-color);
-
-    &.default {
-      background-color: #ffffff;
-    }
-
-    &.dark {
-      background-color: #1a1a1a;
-    }
-
-    &.blue {
-      background-color: #409eff;
-    }
-
-    &.green {
-      background-color: #67c23a;
-    }
-  }
-}
-
-.panel {
-  .panel-header {
-    h3 {
-      color: var(--el-text-color-primary);
-    }
-  }
-}
-
-.tab-item {
-  color: var(--el-text-color-regular);
-
-  &:not(.disabled):hover {
+  .theme-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    transition: all 0.3s ease;
     color: var(--el-text-color-primary);
+
+    &:hover {
+      background-color: var(--el-fill-color-light);
+    }
+
+    &.active {
+      background-color: var(--el-fill-color-light);
+      color: var(--el-color-primary);
+    }
+
+    .theme-preview {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      margin-right: 12px;
+      border: 1px solid var(--el-border-color);
+      flex-shrink: 0;
+
+      &.default {
+        background-color: #ffffff;
+      }
+
+      &.dark {
+        background-color: #1a1a1a;
+        border-color: #ffffff;
+      }
+
+      &.blue {
+        background-color: #409eff;
+      }
+
+      &.green {
+        background-color: #67c23a;
+      }
+    }
+
+    span {
+      font-size: 14px;
+    }
+  }
+}
+
+// 自定义弹出框样式
+:deep(.el-popover.custom-popover) {
+  padding: 0 0 12px 0;
+  border-radius: 8px;
+
+  [data-theme="dark"] & {
+    background-color: #2b2b2b;
+    border: 1px solid #3a3a3a;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+}
+
+// 修改暗色主题下的样式
+[data-theme="dark"] {
+  .file-item {
+    &.active {
+      background-color: var(--el-bg-color) !important;
+      border-color: var(--el-border-color-light);
+    }
+
+    &.can-click.active:hover {
+      border-color: var(--el-color-primary-light-3);
+    }
+
+    .delete-action {
+      .delete-icon {
+        filter: invert(1); // 反转SVG颜色
+        opacity: 0.4;
+
+        &:hover {
+          opacity: 0.8;
+          background-color: var(--el-color-danger-light-3);
+        }
+      }
+    }
   }
 
-  &.active {
-    color: var(--el-color-primary);
+  // 主题切换界面样式
+  .theme-header {
+    color: #e5e5e5;
+    border-bottom: 1px solid #3a3a3a;
+    background-color: #2b2b2b;
+    margin: 0;
+    padding: 16px 24px;
   }
 
-  &.disabled {
-    color: var(--el-text-color-secondary);
+  .theme-content {
+    background-color: #2b2b2b;
+
+    .theme-item {
+      color: #b0b0b0;
+      transition: all 0.3s ease;
+
+      &:hover {
+        background-color: #363636;
+        color: #e5e5e5;
+      }
+
+      &.active {
+        background-color: #363636;
+        color: var(--el-color-primary);
+      }
+
+      .theme-preview {
+        border-color: #4a4a4a;
+
+        &.dark {
+          border-color: #5a5a5a;
+        }
+      }
+
+      span {
+        font-size: 14px;
+        font-weight: 500;
+      }
+    }
+  }
+}
+
+// 添加过渡动画
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+// 暗色主题适配
+[data-theme="dark"] {
+  .file-item {
+    &.active {
+      background-color: var(--el-bg-color) !important;
+      border-color: var(--el-border-color-light);
+    }
+
+    &.can-click.active:hover {
+      border-color: var(--el-color-primary-light-3);
+    }
+  }
+}
+
+// 添加其他主题的适配
+[data-theme="blue"], [data-theme="green"] {
+  .file-item {
+    &.active {
+      background-color: var(--el-bg-color) !important;
+      border-color: var(--el-border-color);
+    }
+
+    &.can-click.active:hover {
+      border-color: var(--el-color-primary);
+    }
+  }
+}
+
+.filter-content {
+  padding: 16px;
+
+  .filter-section {
+    margin-bottom: 20px;
+
+    .filter-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--el-text-color-primary);
+      margin-bottom: 12px;
+    }
+
+    .filter-options {
+      .el-radio-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+    }
   }
 
-  .el-icon {
-    color: currentColor;
-  }
-
-  span {
-    color: currentColor;
+  .filter-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--el-border-color-light);
   }
 }
 </style>
