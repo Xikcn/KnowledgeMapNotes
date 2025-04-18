@@ -12,7 +12,6 @@ class StoreTool:
             # 使用默认的embedding函数（实际使用中可以替换）
             self.embedding_func = embedding_functions.DefaultEmbeddingFunction()
         else:
-            print("使用自定义嵌入模型")
             from embedding_tools.embedding_tools import BgeZhEmbeddingFunction
             embedder = BgeZhEmbeddingFunction(
                 model_path=r"D:\Models_Home\Huggingface\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6",
