@@ -431,7 +431,7 @@ async def delete_session(session_id: str):
     return {"message": f"会话 {session_id} 已清除"}
 
 
-def process_knowledge_graph(base_name: str, text_content: str, original_filename: str):
+def process_knowledge_graph(base_name: str, text_content: str, original_filename: str, noteType: str = "general"):
     """处理文本内容生成知识图谱"""
     try:
         # 获取文件处理锁
@@ -444,6 +444,10 @@ def process_knowledge_graph(base_name: str, text_content: str, original_filename
 
             # 更新状态为处理中
             PROCESS_STATUS[base_name] = "processing"
+
+            # 设置笔记类型
+            kg_manager.noteType = noteType
+            logger.info(f"设置笔记类型为: {noteType}")
 
             # 知识图谱构建过程
             r = kg_manager.知识图谱的构建(text_content)
@@ -478,7 +482,7 @@ def process_knowledge_graph(base_name: str, text_content: str, original_filename
         raise
 
 
-def process_uploaded_file(original_path: str, filename: str):
+def process_uploaded_file(original_path: str, filename: str, noteType: str = "general"):
     """后台处理任务（包含文件转换）"""
     try:
         # 获取文件信息
@@ -513,7 +517,7 @@ def process_uploaded_file(original_path: str, filename: str):
         logger.info(f"文件 {filename} 转换完成，开始处理知识图谱")
 
         # 处理知识图谱
-        process_knowledge_graph(base_name, text_content, filename)
+        process_knowledge_graph(base_name, text_content, filename, noteType)
 
         # 处理完成后更新状态
         PROCESS_STATUS[base_name] = "completed"
@@ -526,35 +530,149 @@ def process_uploaded_file(original_path: str, filename: str):
         logger.error(error_msg, exc_info=True)
 
 
+def process_update_file(original_path: str, filename: str, txt_path: str):
+    """处理文件增量更新"""
+    try:
+        # 获取文件信息
+        base_name = os.path.splitext(filename)[0]
+        file_ext = os.path.splitext(filename)[1].lower()
+        new_txt_filename = f"{base_name}_new.txt"
+        new_txt_path = os.path.join(TXT_FOLDER, new_txt_filename)
+
+        # 在开始处理前将状态设置为updating
+        PROCESS_STATUS[base_name] = "updating"
+        logger.info(f"开始处理文件更新: {filename}, 状态已设置为updating")
+
+        # 设置原始文件名
+        kg_manager.original_file_type = filename  # 使用完整文件名
+
+        # 文件转换处理
+        if file_ext in FILE_PROCESSORS:
+            # 使用专用处理器转换
+            processor = FILE_PROCESSORS[file_ext](output_dir=TXT_FOLDER)
+            processor.process([original_path])
+            processor.save_as_txt(combine=False, filename=new_txt_filename)
+        elif file_ext == '.txt':
+            # 直接复制文本文件
+            shutil.copy(original_path, new_txt_path)
+        else:
+            raise ValueError(f"不支持的文件类型: {file_ext}")
+
+        # 读取新的文本内容
+        with open(new_txt_path, "r", encoding="utf-8") as f:
+            new_text_content = f.read()
+
+        # 读取原始文本内容
+        with open(txt_path, "r", encoding="utf-8") as f:
+            original_text_content = f.read()
+
+        logger.info(f"文件 {filename} 转换完成，开始增量更新知识图谱")
+
+        # 加载原有知识图谱
+        if not kg_manager.load_store(base_name):
+            raise ValueError(f"无法加载原有知识图谱: {base_name}")
+
+        # 执行增量更新
+        logger.info(f"开始执行增量更新: {base_name}")
+        start_time = time.time()
+
+        # 执行增量更新
+        new_kg_triplet = kg_manager.增量更新(new_text_content)
+
+        # 转换为有向图
+        kg_manager.三元组转有向图nx(new_kg_triplet)
+
+        # 绘制更新后的知识图谱
+        kg_manager.绘制知识图谱(base_name)
+
+        # 更新完成后，用新文件替换旧文件
+        shutil.copy(new_txt_path, txt_path)
+        os.remove(new_txt_path)  # 删除临时文件
+
+        # 保存更新后的知识图谱
+        kg_manager.save_store()
+        logger.info(f"知识图谱增量更新完成，耗时: {time.time() - start_time:.2f}秒")
+
+        # 保存并移动结果文件
+        result_file = f"{base_name}.html"
+        if os.path.exists(result_file):
+            shutil.move(result_file, os.path.join(RESULT_FOLDER, result_file))
+        else:
+            raise FileNotFoundError("未生成结果HTML文件")
+
+        # 更新处理状态为已完成
+        PROCESS_STATUS[base_name] = "completed"
+        logger.info(f"知识图谱增量更新完成: {base_name}")
+
+    except Exception as e:
+        error_msg = f"文件增量更新失败: {str(e)}"
+        if 'base_name' in locals():  # 确保base_name已定义
+            PROCESS_STATUS[base_name] = "error"
+        logger.error(error_msg, exc_info=True)
+
+
 @app.post("/upload")
 async def upload_file(
         file: UploadFile = File(...),
+        noteType: str = "general",
         background_tasks: BackgroundTasks = None
 ):
-    """支持多种格式的文件上传接口"""
+    """支持多种格式的文件上传接口，支持增量更新"""
     try:
         # 保存原始文件
         filename = file.filename
         base_name = os.path.splitext(filename)[0]
         original_path = os.path.join(UPLOAD_FOLDER, filename)
+        txt_filename = f"{base_name}.txt"
+        txt_path = os.path.join(TXT_FOLDER, txt_filename)
 
+        # 检查数据库中是否已有该文件
+        file_exists = False
+        existing_txt = False
+
+        # 创建一个专用的storeManager实例来检查文件是否存在
+        file_manager = storeManager(store=chromadb_store, agent=kg_agent)
+        db_files = file_manager.list_files()
+        db_file_ids = db_files.get('ids', [])
+
+        # 检查文件是否存在于数据库中
+        if base_name in [os.path.splitext(file_id)[0] for file_id in db_file_ids]:
+            file_exists = True
+            # 检查文本文件是否存在
+            if os.path.exists(txt_path):
+                existing_txt = True
+
+        # 保存上传的文件
         with open(original_path, "wb") as f:
             contents = await file.read()
             f.write(contents)
 
         logger.info(f"文件 {filename} 上传成功，存储为 {original_path}")
 
-        # 初始化处理状态
-        PROCESS_STATUS[base_name] = "uploading"
+        # 设置状态和后台处理任务
+        if file_exists and existing_txt:
+            # 文件在数据库中已存在，执行增量更新
+            PROCESS_STATUS[base_name] = "updating"
+            logger.info(f"文件 {filename} 已存在，将进行增量更新")
+            background_tasks.add_task(process_update_file, original_path, filename, txt_path)
 
-        # 添加后台处理任务
-        background_tasks.add_task(process_uploaded_file, original_path, filename)
+            return JSONResponse({
+                "status": "updating",
+                "message": "文件已上传，正在进行增量更新",
+                "filename": filename,
+                "is_update": True
+            })
+        else:
+            # 新文件上传，执行常规处理
+            PROCESS_STATUS[base_name] = "uploading"
+            background_tasks.add_task(process_uploaded_file, original_path, filename, noteType)
 
-        return JSONResponse({
-            "status": "uploading",
-            "message": "文件已上传，正在转换处理中",
-            "filename": filename
-        })
+            return JSONResponse({
+                "status": "uploading",
+                "message": "文件已上传，正在转换处理中",
+                "filename": filename,
+                "noteType": noteType
+            })
 
     except Exception as e:
         error_msg = f"文件上传失败: {str(e)}"
@@ -575,6 +693,7 @@ async def get_processing_status(filename: str):
     status_map = {
         "uploading": "上传中",
         "processing": "处理中",
+        "updating": "增量更新中",
         "completed": "已完成",
         "error": "失败"
     }
@@ -734,6 +853,54 @@ async def delete_file(filename: str):
         return JSONResponse(
             status_code=500,
             content={"error": f"删除文件失败: {str(e)}"}
+        )
+
+
+@app.delete("/rag-history/{filename}")
+async def delete_rag_history(filename: str):
+    """删除指定文件的RAG对话历史"""
+    try:
+        base_name = os.path.splitext(filename)[0]
+        # 使用chromadb_store删除RAG历史
+        chromadb_store.delete_rag_history([base_name])
+        return JSONResponse({
+            "message": f"文件 {filename} 的RAG历史记录已成功删除"
+        })
+    except Exception as e:
+        logger.error(f"删除RAG历史记录失败: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"删除RAG历史记录失败: {str(e)}"}
+        )
+
+
+@app.get("/file-entities/{filename}")
+async def get_file_entities(filename: str, count: int = 5):
+    """获取文件的主要实体"""
+    try:
+        base_name = os.path.splitext(filename)[0]
+
+        # 创建一个存储管理器实例
+        manager = storeManager(store=chromadb_store, agent=kg_agent)
+
+        # 获取文件中的主要实体
+        entities = manager.get_n_entity(base_name, count)
+
+        if entities is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "无法获取文件实体"}
+            )
+
+        # 只返回实体列表
+        return JSONResponse({
+            "entities": entities
+        })
+    except Exception as e:
+        logger.error(f"获取文件实体失败: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"获取文件实体失败: {str(e)}"}
         )
 
 

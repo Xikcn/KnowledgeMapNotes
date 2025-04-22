@@ -1,4 +1,5 @@
 import json
+import re
 from collections import defaultdict
 from community import community_louvain
 from pyvis.network import Network
@@ -161,6 +162,76 @@ class KgManager:
                                             }
                                         })
         return self.current_G
+
+    # 增量更新找到要处理的块
+    def _replace_blocks_and_find_changes(self, original_blocks, new_text, split_text_fun):
+        def normalize_text(text):
+            """去除首尾空格、合并多余空格、换行转换为空格"""
+            return re.sub(r'\s+', ' ', text.strip())
+
+        """用原文块替换未变部分，找出新增和删除的块"""
+        normalized_new_text = normalize_text(new_text)  # 归一化新文本
+        replaced_text = normalized_new_text  # 复制新文本
+        matched_blocks = set()  # 记录匹配的块文本
+
+        # **第一步**：替换未变的部分
+        for bid, text in original_blocks:
+            norm_text = normalize_text(text)
+            if norm_text in replaced_text:
+                replaced_text = replaced_text.replace(norm_text, bid, 1)
+                matched_blocks.add(norm_text)
+
+        # **第二步**：计算删除的块（原文本中未出现在新文本中的部分）
+        deleted_blocks = [(bid, text) for bid, text in original_blocks if
+                          normalize_text(text) not in normalized_new_text]
+
+        # **第三步**：用 `block_id` 作为分隔符，分割出变动部分
+        split_pattern = '|'.join(re.escape(bid) for bid, _ in original_blocks)
+        unmatched_parts = re.split(split_pattern, replaced_text)  # 只保留变动部分
+        unmatched_parts = [normalize_text(part) for part in unmatched_parts if part.strip()]  # 清理空格
+
+        # **第四步**：用你的 `split_text()` 切割新增内容
+        added_texts = []
+        for part in unmatched_parts:
+            added_texts.extend([t for t in split_text_fun(part) if t])
+
+        # **第五步**：分配新增块 ID
+        added_blocks = [text for i, text in enumerate(added_texts)]
+
+        return replaced_text, deleted_blocks, added_blocks
+
+    def 增量更新(self, new_text:str):
+        replaced_new_text, deleted_blocks, added_blocks = self._replace_blocks_and_find_changes(
+            self.Bolts,
+            new_text,
+            self.splitter.split_text)
+
+        # 输出
+        print("新文本替换后的文本:")
+        print(replaced_new_text)
+
+        print("\n被删除的块:")
+        for bid, text in deleted_blocks:
+            print(f"{bid}: {text}")
+
+        print("\n新增的块:")
+        for bid, text in added_blocks:
+            print(f"{bid}: {text}")
+        bids_to_remove = []
+
+        # 被删除的块
+        for bid, text in deleted_blocks:
+            bids_to_remove.append(bid)
+
+        filtered_data = [item for item in self.kg_triplet if item['bid'] not in bids_to_remove]
+        add_data = []
+        # 新增的块
+        for bid, text in added_blocks:
+            add_data.append((bid, text))
+        self.kg_triplet = self.知识图谱的构建(add_data)
+        new_kg_triplet = self.kg_triplet + filtered_data
+
+        return new_kg_triplet
 
 
     # 绘制图谱保存为html并且返回network的nx.DiGraph()有向图对象

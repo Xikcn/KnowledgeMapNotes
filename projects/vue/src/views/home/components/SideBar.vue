@@ -1,12 +1,27 @@
 <script setup>
 import {computed, ref} from 'vue'
 import SvgIcon from "@/components/SvgIcon/index.vue";
+import axios from "axios";
 
 const props = defineProps({
   fileListExpand: Boolean,
   enableStreamOutput: Boolean,
+  enableHistoryContext: {
+    type: Boolean,
+    default: true
+  },
+  noteType: {
+    type: String,
+    default: "general"
+  }
 });
-const emits = defineEmits(["update:fileListExpand", "closeAll", "update:enableStreamOutput"]);
+const emits = defineEmits([
+  "update:fileListExpand", 
+  "closeAll", 
+  "update:enableStreamOutput", 
+  "update:enableHistoryContext",
+  "update:noteType"
+]);
 const fileListExpand = computed({
   get() {
     return props.fileListExpand;
@@ -25,9 +40,30 @@ const enableStreamOutput = computed({
   }
 });
 
+const enableHistoryContext = computed({
+  get() {
+    return props.enableHistoryContext;
+  },
+  set(val) {
+    emits("update:enableHistoryContext", val);
+  }
+});
+
+const noteType = computed({
+  get() {
+    return props.noteType;
+  },
+  set(val) {
+    emits("update:noteType", val);
+  }
+});
+
 const menuRef = ref()
 const activeIndex = ref("home")
 const openSettings = ref(false)
+const expandedFileId = ref(null)
+const fileEntities = ref({})
+const loadingEntities = ref({})
 
 const openMenuItem = (index) => {
   activeIndex.value = index;
@@ -41,8 +77,45 @@ const menuItemSelect = (index) => {
     emits("closeAll");
   }
 }
+
+const toggleFileExpand = async (file) => {
+  if (!file || file.status !== 'completed') return;
+  
+  if (expandedFileId.value === file.name) {
+    expandedFileId.value = null;
+    return;
+  }
+  
+  expandedFileId.value = file.name;
+  
+  if (!fileEntities.value[file.name] && !loadingEntities.value[file.name]) {
+    try {
+      loadingEntities.value[file.name] = true;
+      const response = await axios.get(`http://localhost:8000/file-entities/${file.name}`);
+      if (response.data && response.data.entities) {
+        fileEntities.value[file.name] = {
+          entities: response.data.entities,
+          errorMessage: null
+        };
+      }
+    } catch (error) {
+      console.error('获取文件实体失败:', error);
+      fileEntities.value[file.name] = {
+        entities: [],
+        errorMessage: error.response?.data?.error || '获取文件实体失败'
+      };
+    } finally {
+      loadingEntities.value[file.name] = false;
+    }
+  }
+}
+
 defineExpose({
-  openMenuItem
+  openMenuItem,
+  expandedFileId,
+  fileEntities,
+  loadingEntities,
+  toggleFileExpand
 })
 </script>
 
@@ -80,6 +153,26 @@ defineExpose({
     <template #default>
       <div class="settings-content">
         <div class="settings-section">
+          <div class="section-title">图谱构建设置</div>
+          <div class="settings-item">
+            <span class="item-label">笔记类型</span>
+            <el-select v-model="noteType" placeholder="请选择笔记类型" style="width: 140px">
+              <el-option
+                label="通用"
+                value="general"
+              />
+              <el-option
+                label="故事"
+                value="story"
+              />
+            </el-select>
+          </div>
+          <div class="item-description">
+            选择不同的笔记类型，AI将根据类型构建相应的知识图谱结构。
+          </div>
+        </div>
+        
+        <div class="settings-section">
           <div class="section-title">RAG问答设置</div>
           <div class="settings-item">
             <span class="item-label">启用流式输出</span>
@@ -91,6 +184,18 @@ defineExpose({
           </div>
           <div class="item-description">
             开启后，AI回答将实时流式显示，使对话更加自然流畅。
+          </div>
+          
+          <div class="settings-item">
+            <span class="item-label">携带历史上下文</span>
+            <el-switch 
+              v-model="enableHistoryContext"
+              active-text="开启"
+              inactive-text="关闭"
+            />
+          </div>
+          <div class="item-description">
+            开启后，AI回答会参考之前的对话历史，保持上下文连贯性。
           </div>
         </div>
       </div>
@@ -201,6 +306,7 @@ defineExpose({
       line-height: 1.5;
       margin-top: 4px;
       padding-left: 4px;
+      margin-bottom: 16px;
     }
   }
 }

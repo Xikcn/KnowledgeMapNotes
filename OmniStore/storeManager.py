@@ -1,3 +1,4 @@
+import random
 from community import community_louvain
 
 
@@ -23,6 +24,26 @@ class  storeManager:
         except Exception as e:
             print(f"加载知识图谱出错: {file}, 错误: {str(e)}")
             return None
+
+    def get_n_entity(self,file,n):
+        # "bidirectional_mapping": {
+        #     "entity_to_label": dict(json.l
+        try:
+            state = self.store.load_state(file)
+            if state is None or 'bidirectional_mapping' not in state:
+                print(f"找不到文件的实体状态: {file}")
+                return None
+
+            entity = list(state['bidirectional_mapping']['entity_to_label'].keys())
+            if len(entity) <= n:
+                return entity
+            return random.sample(entity, n)
+
+        except Exception as e:
+            print(f"加载知识图谱出错: {file}, 错误: {str(e)}")
+            return None
+
+
 
     def text2entity(self, query: str, file: str):
         current_G = self.get_G(file)

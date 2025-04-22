@@ -223,6 +223,48 @@ const deleteFile = async (file) => {
   }
 };
 
+// 删除RAG历史记录功能
+const deleteRagHistory = async (file, event) => {
+  // 阻止事件冒泡，防止触发文件查看
+  event.stopPropagation();
+  
+  try {
+    // 添加确认弹窗
+    await ElMessageBox.confirm(
+        `确定要清除文件 ${file.name} 的RAG聊天记录吗？此操作不会删除文件和知识图谱。`,
+        '清除RAG历史',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
+    );
+
+    // 调用后端API删除RAG历史
+    await axios.delete(`http://localhost:8000/rag-history/${file.name}`);
+    
+    // 清理本地缓存
+    localStorage.removeItem(`chat_${file.name}`);  // 删除本地聊天记录
+
+    // 清理聊天状态
+    if (fileChatStates.value[file.name]) {
+      delete fileChatStates.value[file.name];
+    }
+
+    // 如果当前正在查看该文件的RAG，清空聊天消息
+    if (currentFile.value && currentFile.value.name === file.name) {
+      chatMessages.value = [];
+    }
+
+    ElMessage.success(`文件 ${file.name} 的RAG历史记录已清除`);
+  } catch (error) {
+    if (error !== 'cancel') {  // 如果不是用户取消操作
+      console.error('清除RAG历史记录失败:', error);
+      ElMessage.error('清除RAG历史记录失败');
+    }
+  }
+};
+
 // 添加停止RAG回答的函数
 const stopRagResponse = () => {
   if (abortController.value) {
@@ -498,7 +540,7 @@ const sendMessage = async () => {
       model: 'deepseek',
       flow: true,
       filename: currentFile.value.name,
-      messages: historyMessages
+      messages: enableHistoryContext.value ? historyMessages : null
     }, streamingIndex);
   } else {
     // 非流式输出模式
@@ -516,7 +558,7 @@ const sendMessage = async () => {
         model: 'deepseek',
         flow: false,
         filename: currentFile.value.name,
-        messages: historyMessages
+        messages: enableHistoryContext.value ? historyMessages : null
       }, {
         signal: abortController.value ? abortController.value.signal : undefined
       });
@@ -611,7 +653,36 @@ const closeFileList = () => {
 }
 
 // 文件状态: 'uploading', 'processing', 'success', 'error'
-const beforeUpload = (file) => {
+const beforeUpload = async (file) => {
+  // 检查文件是否已存在
+  const existingFile = uploadFileList.value.find(item => item.name === file.name);
+  
+  if (existingFile) {
+    // 询问用户是否要覆盖已存在的文件
+    try {
+      await ElMessageBox.confirm(
+        `文件 "${file.name}" 已存在，是否要进行增量更新？`,
+        '文件已存在',
+        {
+          confirmButtonText: '增量更新',
+          cancelButtonText: '取消上传',
+          type: 'warning',
+        }
+      );
+      
+      // 用户确认更新，修改原文件状态为更新中
+      existingFile.status = 'updating';
+      existingFile.display_status = '增量更新中';
+      existingFile.percentage = 0;
+      existingFile.isUpdate = true; // 标记为增量更新
+      return true;
+    } catch (e) {
+      // 用户取消上传
+      return false;
+    }
+  }
+  
+  // 新文件，正常上传
   const fileObj = {
     uid: Date.now(),
     name: file.name,  // 保持原始文件名（包含后缀）
@@ -634,10 +705,20 @@ const onUploadProgress = (event, file) => {
 const onUploadSuccess = (response, file) => {
   const targetFile = uploadFileList.value.find(item => item.name === file.name);
   if (targetFile) {
-    // 修改状态为处理中，不再立即设置为成功
-    targetFile.status = 'processing';
-    targetFile.percentage = 100;
-    targetFile.resultId = response.resultId || Date.now();
+    // 判断是否为增量更新
+    if (targetFile.isUpdate) {
+      // 更新状态为增量更新处理中
+      targetFile.status = 'updating';
+      targetFile.display_status = '增量更新中';
+      targetFile.percentage = 100;
+      targetFile.resultId = response.resultId || Date.now();
+    } else {
+      // 新文件，修改状态为处理中
+      targetFile.status = 'processing';
+      targetFile.display_status = '处理中';
+      targetFile.percentage = 100;
+      targetFile.resultId = response.resultId || Date.now();
+    }
 
     // 开始检查处理状态
     checkFileProcessingStatus(targetFile);
@@ -682,7 +763,15 @@ const updateFileStatus = async (file) => {
       file.status = response.data.status;
       if (response.data.display_status) {
         file.display_status = response.data.display_status;
+      } else {
+        file.display_status = getStatusText(response.data.status);
       }
+      
+      // 如果文件存在增量更新标记并且状态已变为completed，清除更新标记
+      if (file.isUpdate && response.data.status === 'completed') {
+        file.isUpdate = false;
+      }
+      
       return true;
     }
     return false;
@@ -772,15 +861,97 @@ const viewFileResult = async (file) => {
       
       // 使用nextTick确保DOM已更新
       nextTick(() => {
-        // 滚动到底部
         scrollToBottom();
       });
     } catch (error) {
-      ElMessage.error('获取结果失败');
-      console.error('获取结果失败:', error);
+      console.error('查看文件结果失败:', error);
+      ElMessage.error('查看文件结果失败');
+    }
+  } else if (file.status === 'error') {
+    // 处理错误状态的文件，提示用户是否重新构建
+    try {
+      await ElMessageBox.confirm(
+        `文件 ${file.name} 处理失败，是否重新开始构建知识图谱？`,
+        '重新构建',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
+      );
+      
+      // 重新上传文件
+      rebuildKnowledgeGraph(file);
+    } catch (error) {
+      if (error !== 'cancel') {
+        console.error('操作被取消或发生错误:', error);
+      }
+    }
+  } else {
+    // 对于uploading、processing等状态，只显示提示
+    ElMessage.info(`文件 ${file.name} 正在${file.display_status || getStatusText(file.status)}，请稍后查看`);
+  }
+};
+
+// 添加重新构建知识图谱函数
+const rebuildKnowledgeGraph = async (file) => {
+  try {
+    // 更新文件状态为正在上传
+    const targetFile = uploadFileList.value.find(item => item.name === file.name);
+    if (targetFile) {
+      targetFile.status = 'uploading';
+      targetFile.display_status = '重新上传中';
+      targetFile.percentage = 0;
+    }
+    
+    // 从uploads文件夹获取文件（假设文件仍然存在）
+    const formData = new FormData();
+    
+    // 使用fetch API获取文件内容
+    const fileResponse = await fetch(`http://localhost:8000/file-content/${file.name}`);
+    const fileContent = await fileResponse.text();
+    
+    // 创建一个新的Blob对象
+    const fileBlob = new Blob([fileContent], { type: 'text/plain' });
+    
+    // 将Blob添加到FormData
+    formData.append('file', fileBlob, file.name);
+    formData.append('noteType', noteType.value);
+    
+    // 发送重新构建请求
+    const response = await axios.post('http://localhost:8000/upload', formData, {
+      onUploadProgress: (event) => {
+        if (targetFile) {
+          targetFile.percentage = Math.round((event.loaded / event.total) * 100);
+        }
+      }
+    });
+    
+    // 处理响应
+    if (response.data) {
+      if (targetFile) {
+        targetFile.status = 'processing';
+        targetFile.display_status = '处理中';
+        targetFile.percentage = 100;
+      }
+      
+      // 开始检查处理状态
+      checkFileProcessingStatus(targetFile);
+      
+      ElMessage.success(`文件 ${file.name} 重新构建已开始`);
+    }
+  } catch (error) {
+    console.error('重新构建失败:', error);
+    ElMessage.error(`重新构建失败: ${error.message || '未知错误'}`);
+    
+    // 恢复文件状态为错误
+    const targetFile = uploadFileList.value.find(item => item.name === file.name);
+    if (targetFile) {
+      targetFile.status = 'error';
+      targetFile.display_status = '失败';
     }
   }
-}
+};
 
 // 关闭结果视图
 const closeResultView = () => {
@@ -843,38 +1014,39 @@ const switchTab = (tab) => {
   }
 };
 
+// 获取文件状态的文本描述
 const getStatusText = (status) => {
-  // 检查是否有display_status字段（服务器返回的中文状态）
-  if (typeof status === 'object' && status.display_status) {
-    return status.display_status;
+  switch (status) {
+    case 'uploading':
+      return '上传中';
+    case 'processing':
+      return '处理中';
+    case 'updating':
+      return '增量更新中';
+    case 'completed':
+      return '已完成';
+    case 'error':
+      return '处理失败';
+    default:
+      return status;
   }
+};
 
-  // 状态映射
-  const statusMap = {
-    'uploading': '上传中',
-    'processing': '处理中',
-    'completed': '已完成',
-    'error': '失败'
-  };
-
-  return statusMap[status] || '未知';
-}
-
+// 获取文件状态对应的图标
 const getFileIcon = (status) => {
-  // 获取状态值
-  const statusValue = typeof status === 'object' ? status.status : status;
-
-  // 所有处理中状态都使用Loading图标
-  if (statusValue === 'uploading' || statusValue === 'processing') {
-    return Loading;
+  switch (status) {
+    case 'uploading':
+    case 'processing':
+    case 'updating':
+      return Loading;
+    case 'completed':
+      return SuccessFilled;
+    case 'error':
+      return 'circle-close';
+    default:
+      return Document;
   }
-
-  switch(statusValue) {
-    case 'completed': return SuccessFilled;
-    case 'error': return Document;
-    default: return Document;
-  }
-}
+};
 
 // 修改重新加载知识图谱函数
 const reloadKnowledgeGraph = () => {
@@ -1090,6 +1262,29 @@ const loadKnowledgeGraph = async (file) => {
     knowledgeGraphLoading.value = false;
   }
 };
+
+// 添加历史上下文相关状态
+const enableHistoryContext = ref(true);
+const noteType = ref('general');
+
+const onUploadClick = () => {
+  const formData = new FormData();
+  formData.append('file', uploadRef.value.files[0]);
+  formData.append('noteType', noteType.value);
+  
+  axios.post('/api/upload', formData, {
+    onUploadProgress: (e) => {
+      onUploadProgress(e, uploadRef.value.files[0]);
+    }
+  }).then(response => {
+    onUploadSuccess(response.data, uploadRef.value.files[0]);
+  }).catch(error => {
+    onUploadError(error, uploadRef.value.files[0]);
+  });
+}
+
+// 修改onUploadSuccess函数，处理noteType参数
+// ... existing code ...
 </script>
 
 <template>
@@ -1098,6 +1293,8 @@ const loadKnowledgeGraph = async (file) => {
         ref="sideBarRef"
         v-model:fileListExpand="fileListExpand"
         v-model:enableStreamOutput="enableStreamOutput"
+        v-model:enableHistoryContext="enableHistoryContext"
+        v-model:noteType="noteType"
         @update:enableStreamOutput="saveStreamSetting"
         @closeAll="handleCloseAll"
     />
@@ -1177,44 +1374,92 @@ const loadKnowledgeGraph = async (file) => {
                   class="file-item"
                   :class="{
                   'can-click': file.status === 'completed',
-                  'active': currentFile?.name === file.name
+                  'active': currentFile?.name === file.name,
+                  'expanded': sideBarRef?.expandedFileId === file.name
                 }"
-                  @dblclick="viewFileResult(file)"
-                  @mouseenter="currentFileId = file.name"
-                  @mouseleave="currentFileId = null"
               >
-                <div class="file-info">
-                  <el-icon class="file-icon" :class="file.status">
-                    <component :is="getFileIcon(file.status)" />
-                  </el-icon>
-                  <div class="file-name-container">
-                    <el-tooltip
-                        :content="file.name"
-                        placement="right"
-                        :show-after="500"
-                        :hide-after="0"
-                    >
-                      <div class="file-name">{{ file.name }}</div>
-                    </el-tooltip>
-                    <div v-if="file.status === 'uploading'" class="file-progress">
-                      <el-progress :percentage="file.percentage" :show-text="false" :stroke-width="2" />
+                <div class="file-header" 
+                     @dblclick="viewFileResult(file)"
+                     @click="sideBarRef?.toggleFileExpand(file)"
+                     @mouseenter="currentFileId = file.name"
+                     @mouseleave="currentFileId = null">
+                  <div class="file-info">
+                    <el-icon class="file-icon" :class="file.status">
+                      <component :is="getFileIcon(file.status)" />
+                    </el-icon>
+                    <div class="file-name-container">
+                      <el-tooltip
+                          :content="file.name"
+                          placement="right"
+                          :show-after="500"
+                          :hide-after="0"
+                      >
+                        <div class="file-name">{{ file.name }}</div>
+                      </el-tooltip>
+                      <div v-if="file.status === 'uploading'" class="file-progress">
+                        <el-progress :percentage="file.percentage" :show-text="false" :stroke-width="2" />
+                      </div>
                     </div>
+                  </div>
+                  <div class="file-actions">
+                    <div class="file-status" :class="file.status">
+                      {{ file.display_status || getStatusText(file.status) }}
+                    </div>
+                    <transition name="fade">
+                      <div v-if="currentFileId === file.name && file.status === 'completed'" class="delete-action">
+                        <el-tooltip content="清除RAG历史" placement="top">
+                          <img
+                              src="@/assets/icons/svg/clear.svg"
+                              alt="清除RAG历史"
+                              class="clear-icon"
+                              @click.stop="deleteRagHistory(file, $event)"
+                          />
+                        </el-tooltip>
+                        <el-tooltip content="删除文件" placement="top">
+                          <img
+                              src="@/assets/icons/svg/delete.svg"
+                              alt="删除"
+                              class="delete-icon"
+                              @click.stop="deleteFile(file)"
+                          />
+                        </el-tooltip>
+                      </div>
+                    </transition>
                   </div>
                 </div>
-                <div class="file-actions">
-                  <div class="file-status" :class="file.status">
-                    {{ file.display_status || getStatusText(file.status) }}
+                
+                <!-- 展开的实体卡片 -->
+                <div v-if="sideBarRef?.expandedFileId === file.name" class="file-entities-card">
+                  <div v-if="sideBarRef?.loadingEntities[file.name]" class="loading-entities">
+                    <el-icon class="is-loading"><Loading /></el-icon>
+                    <span>加载主要实体中...</span>
                   </div>
-                  <transition name="fade">
-                    <div v-if="currentFileId === file.name && file.status === 'completed'" class="delete-action">
-                      <img
-                          src="@/assets/icons/svg/delete.svg"
-                          alt="删除"
-                          class="delete-icon"
-                          @click.stop="deleteFile(file)"
-                      />
+                  <div v-else-if="sideBarRef?.fileEntities[file.name]?.errorMessage" class="entities-error">
+                    <el-alert
+                      :title="sideBarRef?.fileEntities[file.name]?.errorMessage"
+                      type="error"
+                      :closable="false"
+                      size="small"
+                      show-icon
+                    />
+                  </div>
+                  <div v-else-if="sideBarRef?.fileEntities[file.name]?.entities?.length" class="entities-list">
+                    <div class="entities-title">主要实体</div>
+                    <div class="entities-content">
+                      <el-tag
+                        v-for="entity in sideBarRef?.fileEntities[file.name].entities"
+                        :key="entity"
+                        class="entity-tag"
+                        size="small"
+                        effect="plain"
+                      >
+                        {{ entity }}
+                      </el-tag>
                     </div>
-                  </transition>
+                  </div>
+                  <div v-else class="no-entities">
+                    <el-empty description="暂无实体数据" :image-size="60" />
+                  </div>
                 </div>
               </div>
             </template>
@@ -1232,7 +1477,8 @@ const loadKnowledgeGraph = async (file) => {
             <h1>知识图谱构建系统! 🎉</h1>
             <el-upload
                 drag
-                action="/api/upload"
+                action="http://localhost:8000/upload"
+                :data="{noteType: noteType}"
                 multiple
                 :show-file-list="false"
                 :before-upload="beforeUpload"
@@ -1603,15 +1849,17 @@ const loadKnowledgeGraph = async (file) => {
 
           .file-item {
             display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px;
-            border-radius: 8px;
+            flex-direction: column;
+            border-bottom: 1px solid var(--el-border-color-light);
             margin-bottom: 8px;
             background-color: var(--el-fill-color-lighter);
             transition: all 0.3s ease;
-            user-select: none;
+            border-radius: 8px;
             border: 1px solid transparent;
+            
+            &.expanded {
+              background-color: var(--el-fill-color-light);
+            }
 
             &.active {
               background-color: var(--el-bg-color) !important;
@@ -1635,44 +1883,101 @@ const loadKnowledgeGraph = async (file) => {
                 border-color: var(--el-color-primary-light-3);
               }
             }
-
-            .file-actions {
+            
+            .file-header {
               display: flex;
               align-items: center;
-              gap: 12px;
+              justify-content: space-between;
+              padding: 12px 16px;
+              cursor: pointer;
+              transition: background-color 0.3s;
+              
+              .file-actions {
+                display: flex;
+                align-items: center;
+                gap: 12px;
 
-              .delete-action {
-                .delete-icon {
-                  cursor: pointer;
-                  width: 16px;
-                  height: 16px;
-                  padding: 4px;
-                  border-radius: 4px;
-                  transition: all 0.3s ease;
-                  opacity: 0.6;
+                .delete-action {
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  
+                  .delete-icon, .clear-icon {
+                    cursor: pointer;
+                    width: 16px;
+                    height: 16px;
+                    padding: 4px;
+                    border-radius: 4px;
+                    transition: all 0.3s ease;
+                    opacity: 0.6;
 
-                  &:hover {
-                    opacity: 1;
+                    &:hover {
+                      opacity: 1;
+                    }
+                  }
+                  
+                  .delete-icon:hover {
                     background-color: var(--el-color-danger-light-9);
+                  }
+                  
+                  .clear-icon:hover {
+                    background-color: var(--el-color-warning-light-9);
                   }
                 }
               }
-            }
 
-            .file-info {
-              display: flex;
-              align-items: center;
-              flex: 1;
-              min-width: 0; // 防止子元素溢出
+              .file-info {
+                display: flex;
+                align-items: center;
+                flex: 1;
+                min-width: 0; // 防止子元素溢出
 
-              .file-icon {
-                margin-right: 12px;
-                font-size: 20px;
+                .file-icon {
+                  margin-right: 12px;
+                  font-size: 20px;
+                  flex-shrink: 0;
+
+                  &.uploading, &.processing {
+                    color: var(--el-color-primary);
+                    animation: spin 1.5s infinite linear;
+                  }
+
+                  &.completed {
+                    color: var(--el-color-success);
+                  }
+
+                  &.error {
+                    color: var(--el-color-danger);
+                  }
+                }
+
+                .file-name-container {
+                  flex: 1;
+                  min-width: 0; // 防止子元素溢出
+
+                  .file-name {
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    margin-bottom: 4px;
+                    color: var(--el-text-color-primary);
+                    font-weight: 500;
+                    max-width: 100%;
+                  }
+
+                  .file-progress {
+                    width: 100%;
+                  }
+                }
+              }
+
+              .file-status {
+                font-size: 12px;
+                white-space: nowrap;
                 flex-shrink: 0;
 
                 &.uploading, &.processing {
                   color: var(--el-color-primary);
-                  animation: spin 1.5s infinite linear;
                 }
 
                 &.completed {
@@ -1683,42 +1988,52 @@ const loadKnowledgeGraph = async (file) => {
                   color: var(--el-color-danger);
                 }
               }
-
-              .file-name-container {
-                flex: 1;
-                min-width: 0; // 防止子元素溢出
-
-                .file-name {
-                  white-space: nowrap;
-                  overflow: hidden;
-                  text-overflow: ellipsis;
-                  margin-bottom: 4px;
-                  color: var(--el-text-color-primary);
-                  font-weight: 500;
-                  max-width: 100%;
-                }
-
-                .file-progress {
-                  width: 100%;
-                }
-              }
             }
-
-            .file-status {
-              font-size: 12px;
-              white-space: nowrap;
-              flex-shrink: 0;
-
-              &.uploading, &.processing {
-                color: var(--el-color-primary);
+            
+            .file-entities-card {
+              padding: 12px 16px;
+              border-top: 1px dashed var(--el-border-color-light);
+              background-color: var(--el-bg-color-page);
+              overflow: hidden;
+              transition: max-height 0.3s ease-in-out;
+              
+              .loading-entities {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 12px 0;
+                color: var(--el-text-color-secondary);
+                
+                .el-icon {
+                  margin-right: 8px;
+                  font-size: 18px;
+                }
               }
-
-              &.completed {
-                color: var(--el-color-success);
+              
+              .entities-error {
+                padding: 8px 0;
               }
-
-              &.error {
-                color: var(--el-color-danger);
+              
+              .entities-title {
+                font-size: 14px;
+                font-weight: 600;
+                margin-bottom: 8px;
+                color: var(--el-text-color-primary);
+              }
+              
+              .entities-content {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                
+                .entity-tag {
+                  margin-right: 0;
+                  cursor: default;
+                }
+              }
+              
+              .no-entities {
+                padding: 8px 0;
               }
             }
           }
@@ -2247,10 +2562,10 @@ const loadKnowledgeGraph = async (file) => {
 }
 
 @keyframes spin {
-  0% {
+  from {
     transform: rotate(0deg);
   }
-  100% {
+  to {
     transform: rotate(360deg);
   }
 }
