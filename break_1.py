@@ -99,7 +99,7 @@ app.add_middleware(
 )
 
 # 添加线程池
-executor = ThreadPoolExecutor(max_workers=8)  # 增加线程池大小以处理更多并发请求
+executor = ThreadPoolExecutor(max_workers=16)  # 增加线程池大小以处理更多并发请求
 # 添加文件处理锁
 file_locks = {}
 # 添加RAG问答锁
@@ -235,7 +235,7 @@ async def hybridrag_stream(item: rag_item):
                             logger.warning(f"未能选择向量: {item.filename}")
                             results = []  # 确保是空列表而不是None
                         yield "data: " + json.dumps(
-                            {"type": "status", "content": "向量选择完成", "request_id": request_id}) + "\n\n"
+                            {"type": "status", "content": "生成中...", "request_id": request_id}) + "\n\n"
 
                         # 准备流式输出
                         logger.info(f"使用流式输出模式: {item.request}")
@@ -442,29 +442,20 @@ def process_knowledge_graph(base_name: str, text_content: str, original_filename
             logger.info(f"开始处理文件 {base_name} 的知识图谱...")
             start_time = time.time()
 
-            # 更新状态为知识图谱构建中
-            PROCESS_STATUS[base_name] = "building_kg"
+            # 更新状态为处理中
+            PROCESS_STATUS[base_name] = "processing"
 
             # 知识图谱构建过程
             r = kg_manager.知识图谱的构建(text_content)
             logger.info(f"知识图谱构建完成，耗时: {time.time() - start_time:.2f}秒")
 
-            # 更新状态为有向图转换中
-            PROCESS_STATUS[base_name] = "converting_kg"
-
             # 转换为有向图
             kg_manager.三元组转有向图nx(r)
-
-            # 更新状态为知识图谱绘制中
-            PROCESS_STATUS[base_name] = "drawing_kg"
 
             # 绘制知识图谱
             start_time = time.time()
             kg_manager.绘制知识图谱(base_name)
             kg_manager.original_file_type = original_filename  # 使用原始文件名
-
-            # 更新状态为保存知识图谱中
-            PROCESS_STATUS[base_name] = "saving_kg"
 
             kg_manager.save_store()
             logger.info(f"知识图谱绘制完成，耗时: {time.time() - start_time:.2f}秒")
@@ -482,7 +473,7 @@ def process_knowledge_graph(base_name: str, text_content: str, original_filename
 
     except Exception as e:
         error_msg = str(e)
-        PROCESS_STATUS[base_name] = f"error"
+        PROCESS_STATUS[base_name] = "error"
         logger.error(f"处理文件 {base_name} 出错: {error_msg}", exc_info=True)
         raise
 
@@ -519,8 +510,6 @@ def process_uploaded_file(original_path: str, filename: str):
         with open(txt_path, "r", encoding="utf-8") as f:
             text_content = f.read()
 
-        # 更新状态表明开始处理知识图谱
-        PROCESS_STATUS[base_name] = "processing_kg"
         logger.info(f"文件 {filename} 转换完成，开始处理知识图谱")
 
         # 处理知识图谱
@@ -585,14 +574,9 @@ async def get_processing_status(filename: str):
     # 状态映射，用于前端展示
     status_map = {
         "uploading": "上传中",
-        "processing": "文件处理中",
-        "processing_kg": "知识图谱准备中",
-        "building_kg": "知识图谱构建中",
-        "converting_kg": "知识图谱转换中",
-        "drawing_kg": "知识图谱绘制中",
-        "saving_kg": "知识图谱保存中",
-        "completed": "处理完成",
-        "error": "处理出错"
+        "processing": "处理中",
+        "completed": "已完成",
+        "error": "失败"
     }
 
     if status:
@@ -687,22 +671,16 @@ async def list_files():
         db_metadatas = db_files.get('metadatas', [])
 
         # 获取当前正在处理的文件（从PROCESS_STATUS获取）
-        processing_statuses = ["uploading", "processing", "processing_kg",
-                               "building_kg", "converting_kg", "drawing_kg", "saving_kg"]
+        processing_statuses = ["uploading", "processing"]
         processing_files = {base_name: status for base_name, status in PROCESS_STATUS.items()
                             if status in processing_statuses}
 
         # 状态映射，用于前端展示
         status_map = {
             "uploading": "上传中",
-            "processing": "文件处理中",
-            "processing_kg": "知识图谱准备中",
-            "building_kg": "知识图谱构建中",
-            "converting_kg": "知识图谱转换中",
-            "drawing_kg": "知识图谱绘制中",
-            "saving_kg": "知识图谱保存中",
-            "completed": "处理完成",
-            "error": "处理出错"
+            "processing": "处理中",
+            "completed": "已完成",
+            "error": "失败"
         }
 
         # 合并结果：先处理数据库中的文件

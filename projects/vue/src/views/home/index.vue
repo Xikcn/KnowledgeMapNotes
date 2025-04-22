@@ -13,9 +13,6 @@ const isSearch = ref(false);
 const searchValue = ref('');
 const uploadFileList = ref([]);
 const filteredFileList = ref([]);
-const currentHtml = ref('');
-const showHtmlContent = ref(false);
-const htmlIframe = ref(null);
 
 // 新增顶部导航和视图控制
 const activeView = ref('upload'); // 'upload', 'result'
@@ -31,7 +28,6 @@ const panelVisible = reactive({
 
 // RAG聊天相关
 const chatMessages = ref([
-  { role: 'system', content: '我是基于当前文档的HybridRAG助手，可以回答与文档相关的问题。' }
 ]);
 const userInput = ref('');
 const chatLoading = ref(false);
@@ -61,7 +57,7 @@ const enableStreamOutput = ref(false);
 
 // 保存和获取流式输出设置
 const saveStreamSetting = () => {
-  localStorage.setItem('rag-stream-output', enableStreamOutput.value ? 'true' : 'false');
+  localStorage.setItem('rag-stream-output', enableStreamOutput ? 'true' : 'false');
 };
 
 // 自动滚动到底部功能
@@ -168,8 +164,7 @@ onMounted(async () => {
       uploadFileList.value.forEach(file => {
         // 包括所有处理中状态
         const processingStatuses = [
-          'uploading', 'processing', 'processing_kg',
-          'building_kg', 'converting_kg', 'drawing_kg', 'saving_kg'
+          'uploading', 'processing'
         ];
 
         if (processingStatuses.includes(file.status)) {
@@ -204,10 +199,15 @@ const deleteFile = async (file) => {
     if (index !== -1) {
       uploadFileList.value.splice(index, 1);
     }
-    console.log(`kg_${file.name}`)
+    
     // 清理本地缓存
     localStorage.removeItem(`kg_${file.name}`);  // 删除知识图谱数据
     localStorage.removeItem(`chat_${file.name}`);  // 删除聊天记录
+
+    // 清理聊天状态
+    if (fileChatStates.value[file.name]) {
+      delete fileChatStates.value[file.name];
+    }
 
     // 如果删除的是当前查看的文件，关闭结果视图
     if (currentFile.value && currentFile.value.name === file.name) {
@@ -304,8 +304,79 @@ const processStreamResponse = async (url, data, messageIndex) => {
           else if (eventData.type === 'final') {
             // 接收最终结果，包括答案和参考资料
             if (messageIndex !== -1 && chatMessages.value[messageIndex]) {
-              chatMessages.value[messageIndex].content.answer = eventData.answer;
-              chatMessages.value[messageIndex].content.material = eventData.material;
+              // 检查响应内容是否为JSON格式
+              let finalAnswer = eventData.answer;
+              let finalMaterial = eventData.material;
+              
+              // 使用正则表达式匹配```json和```之间的内容
+              const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
+              
+              if (typeof finalAnswer === 'string') {
+                const jsonMatch = finalAnswer.match(jsonRegex);
+                if (jsonMatch && jsonMatch[1]) {
+                  try {
+                    const jsonContent = JSON.parse(jsonMatch[1]);
+                    if (jsonContent.answer) {
+                      // 如果answer是数组，则将其连接为字符串
+                      if (Array.isArray(jsonContent.answer)) {
+                        finalAnswer = jsonContent.answer.join('');
+                      } else {
+                        finalAnswer = jsonContent.answer;
+                      }
+                    }
+                    
+                    // 检查material是否存在且非空
+                    if (jsonContent.material) {
+                      if (Array.isArray(jsonContent.material) && jsonContent.material.length > 0) {
+                        finalMaterial = jsonContent.material.join('\n');
+                      } else if (typeof jsonContent.material === 'string' && jsonContent.material.trim() !== '') {
+                        finalMaterial = jsonContent.material;
+                      } else {
+                        finalMaterial = '';
+                      }
+                    } else {
+                      finalMaterial = '';
+                    }
+                  } catch (e) {
+                    console.warn('无法解析JSON代码块内容:', e);
+                  }
+                } else if (finalAnswer.trim().startsWith('{') && finalAnswer.trim().endsWith('}')) {
+                  // 尝试直接解析可能的JSON字符串
+                  try {
+                    const jsonContent = JSON.parse(finalAnswer);
+                    if (jsonContent.answer) {
+                      if (Array.isArray(jsonContent.answer)) {
+                        finalAnswer = jsonContent.answer.join('');
+                      } else {
+                        finalAnswer = jsonContent.answer;
+                      }
+                    }
+                    
+                    if (jsonContent.material) {
+                      if (Array.isArray(jsonContent.material) && jsonContent.material.length > 0) {
+                        finalMaterial = jsonContent.material.join('\n');
+                      } else if (typeof jsonContent.material === 'string' && jsonContent.material.trim() !== '') {
+                        finalMaterial = jsonContent.material;
+                      } else {
+                        finalMaterial = '';
+                      }
+                    } else {
+                      finalMaterial = '';
+                    }
+                  } catch (e) {
+                    console.warn('无法解析answer中的JSON内容:', e);
+                  }
+                }
+              }
+              
+              // 更新聊天消息
+              chatMessages.value[messageIndex].content.answer = finalAnswer;
+              if (finalMaterial && finalMaterial.trim() !== '') {
+                chatMessages.value[messageIndex].content.material = finalMaterial;
+              } else {
+                // 如果material为空则不显示
+                chatMessages.value[messageIndex].content.material = '';
+              }
               chatMessages.value[messageIndex].streaming = false;
 
               // 自动滚动到底部
@@ -629,6 +700,11 @@ const onUploadError = (error, file) => {
   }
 }
 
+// 添加handleSearch函数，这个函数在搜索框输入时被调用，但之前未定义
+const handleSearch = () => {
+  handleFilter();
+};
+
 // 查看文件结果
 const viewFileResult = async (file) => {
   if (file.status === 'completed') {
@@ -678,22 +754,27 @@ const viewFileResult = async (file) => {
         fileContentLoading.value = false;
       }
 
-      // 加载聊天记录时使用原始文件名
+      // 从localStorage加载聊天记录
       const savedChat = localStorage.getItem(`chat_${file.name}`);
       if (savedChat) {
         chatMessages.value = JSON.parse(savedChat);
       } else {
+        // 如果没有保存的聊天记录，创建新的
         chatMessages.value = [
-          { role: 'system', content: '我是基于当前文档的HybridRAG助手，可以回答与文档相关的问题。' }
         ];
       }
 
-      // 如果当前是RAG标签，自动滚动到最新消息
-      if (activeTab.value === 'rag') {
-        nextTick(() => {
-          scrollToBottom();
-        });
-      }
+      // 启用自动滚动
+      autoScroll.value = true;
+      
+      // 不管当前是什么标签，先切换到RAG标签
+      activeTab.value = 'rag';
+      
+      // 使用nextTick确保DOM已更新
+      nextTick(() => {
+        // 滚动到底部
+        scrollToBottom();
+      });
     } catch (error) {
       ElMessage.error('获取结果失败');
       console.error('获取结果失败:', error);
@@ -718,7 +799,6 @@ const closeResultView = () => {
   knowledgeGraphData.value = null;
   currentChatFile.value = null;
   chatMessages.value = [
-    { role: 'system', content: '我是基于当前文档的HybridRAG助手，可以回答与文档相关的问题。' }
   ];
 }
 
@@ -772,12 +852,7 @@ const getStatusText = (status) => {
   // 状态映射
   const statusMap = {
     'uploading': '上传中',
-    'processing': '文件处理中',
-    'processing_kg': '知识图谱准备中',
-    'building_kg': '知识图谱构建中',
-    'converting_kg': '知识图谱转换中',
-    'drawing_kg': '知识图谱绘制中',
-    'saving_kg': '知识图谱保存中',
+    'processing': '处理中',
     'completed': '已完成',
     'error': '失败'
   };
@@ -790,13 +865,7 @@ const getFileIcon = (status) => {
   const statusValue = typeof status === 'object' ? status.status : status;
 
   // 所有处理中状态都使用Loading图标
-  if (statusValue === 'uploading' ||
-      statusValue === 'processing' ||
-      statusValue === 'processing_kg' ||
-      statusValue === 'building_kg' ||
-      statusValue === 'converting_kg' ||
-      statusValue === 'drawing_kg' ||
-      statusValue === 'saving_kg') {
+  if (statusValue === 'uploading' || statusValue === 'processing') {
     return Loading;
   }
 
@@ -941,24 +1010,45 @@ const viewFile = async (file) => {
 
 // 准备文件的聊天状态
 const prepareChatState = (file) => {
-  // 如果该文件没有聊天记录，初始化一个
-  if (!fileChatStates.value[file.name]) {
-    fileChatStates.value[file.name] = {
-      messages: [
-        { role: 'system', content: `我是基于文档《${file.name}》的HybridRAG助手，可以回答与文档相关的问题。` }
-      ],
-      lastActive: new Date().getTime()
-    };
+  // 首先尝试从localStorage加载聊天记录
+  const savedChat = localStorage.getItem(`chat_${file.name}`);
+  
+  if (savedChat) {
+    // 如果localStorage中有聊天记录，使用它
+    chatMessages.value = JSON.parse(savedChat);
+    
+    // 同时更新fileChatStates中的记录
+    if (!fileChatStates.value[file.name]) {
+      fileChatStates.value[file.name] = {
+        messages: JSON.parse(savedChat),
+        lastActive: new Date().getTime()
+      };
+    } else {
+      fileChatStates.value[file.name].messages = JSON.parse(savedChat);
+      fileChatStates.value[file.name].lastActive = new Date().getTime();
+    }
   } else {
-    // 更新最后活动时间
-    fileChatStates.value[file.name].lastActive = new Date().getTime();
+    // 如果localStorage中没有聊天记录，检查fileChatStates
+    if (!fileChatStates.value[file.name]) {
+      // 如果fileChatStates中也没有，创建新的聊天记录
+      fileChatStates.value[file.name] = {
+        messages: [
+          { role: 'system', content: `我是基于文档《${file.name}》的HybridRAG助手，可以回答与文档相关的问题。` }
+        ],
+        lastActive: new Date().getTime()
+      };
+      
+      // 更新聊天消息
+      chatMessages.value = [...fileChatStates.value[file.name].messages];
+    } else {
+      // 如果fileChatStates中有记录，使用它
+      fileChatStates.value[file.name].lastActive = new Date().getTime();
+      chatMessages.value = [...fileChatStates.value[file.name].messages];
+    }
   }
 
   // 设置当前聊天文件
   currentChatFile.value = file;
-
-  // 从文件状态中加载聊天记录
-  chatMessages.value = [...fileChatStates.value[file.name].messages];
 
   // 如果切换到RAG标签，自动滚动到底部
   if (activeTab.value === 'rag') {
@@ -1333,13 +1423,13 @@ const loadKnowledgeGraph = async (file) => {
                       <el-input
                           v-model="userInput"
                           type="textarea"
-                          :rows="2"
+                          :autosize="{ minRows: 2, maxRows: 4 }"
                           placeholder="输入问题..."
                           :disabled="chatLoading"
                           @keyup.enter.ctrl="sendMessage"
                       />
                       <div class="button-group">
-                        <el-button v-if="chatLoading && enableStreamOutput.value"
+                        <el-button v-if="chatLoading && enableStreamOutput"
                                    type="warning"
                                    @click="stopRagResponse">
                           停止生成

@@ -371,6 +371,7 @@ class KgManager:
               </script>
               """
             content = content.replace("</body>", js_injection + "</body>")
+            content = content.replace(f' <script src="lib/bindings/utils.js"></script>','')
             f.seek(0)
             f.write(content)
             f.truncate()
