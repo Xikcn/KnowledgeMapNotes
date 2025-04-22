@@ -3,6 +3,11 @@
 ## 项目展示
 https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 
+## 待完成的功能
+问题生成
+前端加入增量更新与差于对比
+
+
 
 ### 技术栈
 #### 后端功能实现
@@ -15,5 +20,4 @@ https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 7. 消息队列（采用简单方式，不采用redis方便单机部署）
 8. 增量更新（增加新增块的实体与关系，删除消失块相关实体与关系）
 9. fastapi
-
 

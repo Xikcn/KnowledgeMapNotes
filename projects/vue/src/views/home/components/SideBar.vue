@@ -4,8 +4,9 @@ import SvgIcon from "@/components/SvgIcon/index.vue";
 
 const props = defineProps({
   fileListExpand: Boolean,
+  enableStreamOutput: Boolean,
 });
-const emits = defineEmits(["update:fileListExpand", "closeAll"]);
+const emits = defineEmits(["update:fileListExpand", "closeAll", "update:enableStreamOutput"]);
 const fileListExpand = computed({
   get() {
     return props.fileListExpand;
@@ -13,7 +14,17 @@ const fileListExpand = computed({
   set(val) {
     emits("update:fileListExpand", val);
   }
-})
+});
+
+const enableStreamOutput = computed({
+  get() {
+    return props.enableStreamOutput;
+  },
+  set(val) {
+    emits("update:enableStreamOutput", val);
+  }
+});
+
 const menuRef = ref()
 const activeIndex = ref("home")
 const openSettings = ref(false)
@@ -67,7 +78,22 @@ defineExpose({
       </div>
     </template>
     <template #default>
-
+      <div class="settings-content">
+        <div class="settings-section">
+          <div class="section-title">RAG问答设置</div>
+          <div class="settings-item">
+            <span class="item-label">启用流式输出</span>
+            <el-switch 
+              v-model="enableStreamOutput"
+              active-text="开启"
+              inactive-text="关闭"
+            />
+          </div>
+          <div class="item-description">
+            开启后，AI回答将实时流式显示，使对话更加自然流畅。
+          </div>
+        </div>
+      </div>
     </template>
   </el-dialog>
 </template>
@@ -139,6 +165,43 @@ defineExpose({
 
   .close-icon:hover {
     background-color: var(--el-fill-color-light);
+  }
+}
+
+.settings-content {
+  padding: 0 16px;
+
+  .settings-section {
+    margin-bottom: 24px;
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--el-border-color-light);
+    }
+
+    .settings-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+
+      .item-label {
+        font-size: 14px;
+        color: var(--el-text-color-primary);
+      }
+    }
+
+    .item-description {
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      line-height: 1.5;
+      margin-top: 4px;
+      padding-left: 4px;
+    }
   }
 }
 </style>

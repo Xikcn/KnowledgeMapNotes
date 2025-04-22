@@ -3,8 +3,11 @@ from collections import defaultdict
 import networkx as nx
 import chromadb
 from chromadb.utils import embedding_functions
+import time
+
+
 class StoreTool:
-    def __init__(self, storage_path="./chroma_data",embedding_function=None):
+    def __init__(self, storage_path="./chroma_data", embedding_function=None):
         # 初始化chromadb客户端
         self.client = chromadb.PersistentClient(path=storage_path)
 
@@ -17,7 +20,7 @@ class StoreTool:
                 model_path=r"D:\Models_Home\Huggingface\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6",
                 device="cuda"  # 可选，强制使用GPU
             )
-            self.embedding_func =embedder
+            self.embedding_func = embedder
 
         # 获取或创建集合
         self.collection = self.client.get_or_create_collection(
@@ -27,6 +30,11 @@ class StoreTool:
         # 分块后的文本向量化结果，进行向量查询
         self.vector_collection = self.client.get_or_create_collection(
             name="bolt_vectors",
+            embedding_function=self.embedding_func
+        )
+        # 考虑加入用户聊天记录,方便消息队列处理rag，而不是前端关闭，后端就不进行处理了，方便后端直接保存到数据库
+        self.rag_history_collection = self.client.get_or_create_collection(
+            name="history_vectors",
             embedding_function=self.embedding_func
         )
 
@@ -45,10 +53,10 @@ class StoreTool:
             metadatas.append(entry_metadata)
 
         self.vector_collection.upsert(
-            ids=[bid for bid,text in kg_manager.Bolts],
+            ids=[bid for bid, text in kg_manager.Bolts],
             metadatas=metadatas,
-            embeddings= self.embedding_func([text for bid,text in kg_manager.Bolts]),
-            documents=[text for bid,text in kg_manager.Bolts]
+            embeddings=self.embedding_func([text for bid, text in kg_manager.Bolts]),
+            documents=[text for bid, text in kg_manager.Bolts]
         )
 
         """保存KgManager状态到chromadb"""
@@ -107,7 +115,6 @@ class StoreTool:
         self.collection.delete(ids=filenames)
         return "delete_states success"
 
-
     def list_files(self):
         """获取所有存储的文件信息"""
         return self.collection.get()
@@ -147,3 +154,66 @@ class StoreTool:
             "metadatas": results["metadatas"][0],
             "distances": results["distances"][0]
         }
+
+    def save_rag_history(self, filename, messages):
+        """保存RAG对话历史到数据库
+
+        Args:
+            filename: 文件ID，与kg_states集合中的ID保持一致
+            messages: 消息列表，包含role和content字段的字典列表
+        """
+        if not messages:
+            return
+
+        # 准备元数据
+        metadata = {
+            "file": filename,
+            "message_count": len(messages),
+            "last_updated": str(int(time.time()))
+        }
+
+        # 将消息列表转换为JSON字符串
+        message_json = json.dumps(messages, ensure_ascii=False)
+
+        # 使用与文件名相同的ID，方便与知识图谱关联
+        self.rag_history_collection.upsert(
+            ids=[filename],
+            metadatas=[metadata],
+            documents=[message_json]
+        )
+
+        return "rag_history_saved"
+
+    def get_rag_history(self, filename):
+        """获取指定文件的RAG对话历史
+
+        Args:
+            filename: 文件ID
+
+        Returns:
+            消息列表或None（如果不存在）
+        """
+        results = self.rag_history_collection.get(ids=[filename])
+
+        if not results["metadatas"]:
+            return None
+
+        try:
+            # 解析消息JSON
+            messages = json.loads(results["documents"][0])
+            return messages
+        except Exception as e:
+            print(f"解析RAG历史记录失败: {e}")
+            return None
+
+    def delete_rag_history(self, filenames: list):
+        """删除指定文件的RAG对话历史
+
+        Args:
+            filenames: 文件ID列表
+        """
+        if not isinstance(filenames, list) or len(filenames) == 0:
+            raise ValueError("filenames必须是非空列表")
+
+        self.rag_history_collection.delete(ids=filenames)
+        return "delete_rag_history success"

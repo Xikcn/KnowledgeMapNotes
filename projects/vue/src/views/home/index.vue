@@ -1,8 +1,8 @@
 <script setup>
 import SideBar from "./components/SideBar.vue";
-import {ref, reactive, onMounted, watch} from "vue";
+import {ref, reactive, onMounted, watch, nextTick} from "vue";
 import SvgIcon from "@/components/SvgIcon/index.vue";
-import {Link, Document, Loading, SuccessFilled, Download, ChatDotRound, Tickets, View, Hide} from '@element-plus/icons-vue';
+import {Link, Document, Loading, SuccessFilled, Download, ChatDotRound, Tickets, View, Hide, ArrowDown} from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import axios from 'axios';
 import { themes, applyTheme } from '@/styles/theme';
@@ -35,6 +35,9 @@ const chatMessages = ref([
 ]);
 const userInput = ref('');
 const chatLoading = ref(false);
+const currentChatFile = ref(null); // 当前正在聊天的文件
+const abortController = ref(null); // 用于取消请求的控制器
+const fileChatStates = ref({}); // 存储每个文件的聊天状态
 
 // 添加文件内容相关状态
 const fileContent = ref('');
@@ -52,6 +55,50 @@ const themeOptions = [
   { name: '护眼主题', value: 'green' }
 ];
 const currentTheme = ref('default');
+
+// 添加RAG流式输出开关设置
+const enableStreamOutput = ref(false);
+
+// 保存和获取流式输出设置
+const saveStreamSetting = () => {
+  localStorage.setItem('rag-stream-output', enableStreamOutput.value ? 'true' : 'false');
+};
+
+// 自动滚动到底部功能
+const chatMessagesContainer = ref(null);
+const showScrollButton = ref(false);
+const autoScroll = ref(true);
+
+// 添加流式处理状态变量
+const streamingStatus = ref('');
+
+// 监听聊天消息区域的滚动事件
+const handleChatScroll = () => {
+  if (!chatMessagesContainer.value) return;
+
+  const container = chatMessagesContainer.value;
+  const isScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
+
+  // 只有当用户手动上滑时才禁用自动滚动
+  if (!isScrolledToBottom && !chatLoading.value) {
+    autoScroll.value = false;
+    showScrollButton.value = true;
+  } else if (isScrolledToBottom) {
+    autoScroll.value = true;
+    showScrollButton.value = false;
+  }
+};
+
+// 滚动到底部函数
+const scrollToBottom = () => {
+  if (!chatMessagesContainer.value) return;
+
+  nextTick(() => {
+    chatMessagesContainer.value.scrollTop = chatMessagesContainer.value.scrollHeight;
+    autoScroll.value = true;
+    showScrollButton.value = false;
+  });
+};
 
 // 修改主题切换函数
 const changeTheme = (theme) => {
@@ -99,12 +146,17 @@ onMounted(async () => {
     const savedTheme = localStorage.getItem('app-theme') || 'default';
     changeTheme(savedTheme);
 
+    // 加载流式输出设置
+    const savedStreamSetting = localStorage.getItem('rag-stream-output');
+    enableStreamOutput.value = savedStreamSetting === 'true';
+
     const response = await axios.get('http://localhost:8000/list-files');
     if (response.data && Array.isArray(response.data.files)) {
-      // 将历史文件添加到文件列表，保持原始文件名
+      // 将历史文件添加到文件列表，保持原始文件名和状态
       uploadFileList.value = response.data.files.map(file => ({
         name: file.filename || file.name || file,  // 保持原始文件名
         status: file.status || 'completed',
+        display_status: file.display_status || (file.status ? getStatusText(file.status) : '已完成'),
         size: file.size || 0,
         percentage: 100
       }));
@@ -114,7 +166,13 @@ onMounted(async () => {
 
       // 检查是否有未完成的文件
       uploadFileList.value.forEach(file => {
-        if (file.status === 'processing' || file.status === 'uploading') {
+        // 包括所有处理中状态
+        const processingStatuses = [
+          'uploading', 'processing', 'processing_kg',
+          'building_kg', 'converting_kg', 'drawing_kg', 'saving_kg'
+        ];
+
+        if (processingStatuses.includes(file.status)) {
           checkFileProcessingStatus(file);
         }
       });
@@ -130,13 +188,13 @@ const deleteFile = async (file) => {
   try {
     // 添加确认弹窗
     await ElMessageBox.confirm(
-      `确定要删除文件 ${file.name} 吗？此操作将同时删除相关的聊天记录和知识图谱。`,
-      '删除确认',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
+        `确定要删除文件 ${file.name} 吗？此操作将同时删除相关的聊天记录和知识图谱。`,
+        '删除确认',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
     );
 
     await axios.delete(`http://localhost:8000/delete/${file.name}`);
@@ -146,7 +204,7 @@ const deleteFile = async (file) => {
     if (index !== -1) {
       uploadFileList.value.splice(index, 1);
     }
-
+    console.log(`kg_${file.name}`)
     // 清理本地缓存
     localStorage.removeItem(`kg_${file.name}`);  // 删除知识图谱数据
     localStorage.removeItem(`chat_${file.name}`);  // 删除聊天记录
@@ -165,6 +223,144 @@ const deleteFile = async (file) => {
   }
 };
 
+// 添加停止RAG回答的函数
+const stopRagResponse = () => {
+  if (abortController.value) {
+    abortController.value.abort();
+    abortController.value = null;
+    chatLoading.value = false;
+    // 移除正在思考的消息
+    chatMessages.value = chatMessages.value.filter(msg => !msg.thinking);
+    ElMessage.info('已停止回答');
+  }
+};
+
+// 处理流式输出的函数 - 使用 EventSource
+const processStreamResponse = async (url, data, messageIndex) => {
+  try {
+    chatLoading.value = true;
+    streamingStatus.value = '准备连接...';
+
+    // 创建一个新的AbortController
+    abortController.value = new AbortController();
+
+    // 直接以POST方式发送数据
+    const postResponse = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+      signal: abortController.value.signal
+    });
+
+    if (!postResponse.ok) {
+      const errorText = await postResponse.text();
+      throw new Error(`HTTP error! status: ${postResponse.status}, message: ${errorText}`);
+    }
+
+    streamingStatus.value = '已连接，等待响应...';
+    const reader = postResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    // 开始读取流数据
+    while (true) {
+      if (!abortController.value) break; // 如果已中断，退出循环
+
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      // 解码收到的数据
+      buffer += decoder.decode(value, { stream: true });
+
+      // 处理SSE格式的数据
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || ''; // 最后一行可能不完整，保留到下一次处理
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+
+        try {
+          const eventData = JSON.parse(line.substring(6));
+
+          // 根据不同类型的消息进行处理
+          if (eventData.type === 'status') {
+            console.log('Status update:', eventData.content);
+            // 在UI上显示当前处理状态
+            streamingStatus.value = eventData.content;
+          }
+          else if (eventData.type === 'content') {
+            // 更新聊天内容
+            if (messageIndex !== -1 && chatMessages.value[messageIndex]) {
+              chatMessages.value[messageIndex].content.answer = eventData.full;
+
+              // 自动滚动到底部
+              if (autoScroll.value) {
+                scrollToBottom();
+              }
+            }
+          }
+          else if (eventData.type === 'final') {
+            // 接收最终结果，包括答案和参考资料
+            if (messageIndex !== -1 && chatMessages.value[messageIndex]) {
+              chatMessages.value[messageIndex].content.answer = eventData.answer;
+              chatMessages.value[messageIndex].content.material = eventData.material;
+              chatMessages.value[messageIndex].streaming = false;
+
+              // 自动滚动到底部
+              if (autoScroll.value) {
+                scrollToBottom();
+              }
+
+              // 保存聊天记录到localStorage
+              if (currentFile.value?.name) {
+                const chatHistory = chatMessages.value.filter(msg => !msg.thinking && !msg.streaming);
+                localStorage.setItem(`chat_${currentFile.value.name}`, JSON.stringify(chatHistory));
+              }
+            }
+          }
+          else if (eventData.type === 'error') {
+            // 处理错误
+            console.error('Stream error:', eventData.content);
+            ElMessage.error(eventData.content || '获取回复失败');
+          }
+          else if (eventData.type === 'done') {
+            // 处理完成
+            console.log('Stream completed');
+            streamingStatus.value = '';
+            break;
+          }
+        } catch (e) {
+          console.error('Error parsing SSE data:', e, line);
+        }
+      }
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      // 请求被中断，不处理
+      console.log('Stream aborted by user');
+      streamingStatus.value = '已停止生成';
+      setTimeout(() => {
+        streamingStatus.value = '';
+      }, 2000);
+      return;
+    }
+
+    console.error('流式输出处理失败:', error);
+    ElMessage.error(error.message || '获取回复失败');
+    streamingStatus.value = '';
+
+    // 移除流式输出消息
+    if (messageIndex !== -1 && chatMessages.value[messageIndex]) {
+      chatMessages.value.splice(messageIndex, 1);
+    }
+  } finally {
+    chatLoading.value = false;
+    abortController.value = null;
+  }
+};
+
 // 修改RAG请求函数
 const sendMessage = async () => {
   if (!userInput.value.trim() || chatLoading.value) return;
@@ -175,24 +371,30 @@ const sendMessage = async () => {
     return;
   }
 
+  // 如果切换了文件，保存当前文件的聊天记录
+  if (currentChatFile.value && currentChatFile.value !== currentFile.value.name) {
+    const chatHistory = chatMessages.value.filter(msg => !msg.thinking && !msg.streaming);
+    localStorage.setItem(`chat_${currentChatFile.value}`, JSON.stringify(chatHistory));
+  }
+
+  // 更新当前聊天文件
+  currentChatFile.value = currentFile.value.name;
+
   chatMessages.value.push({ role: 'user', content: userInput.value });
   const currentQuestion = userInput.value;
   userInput.value = '';
   chatLoading.value = true;
 
-  chatMessages.value.push({ role: 'assistant', content: '思考中...', thinking: true });
-
-  try {
-    // 处理历史消息，确保格式正确
-    const historyMessages = chatMessages.value
-      .filter(msg => !msg.thinking && msg.role !== 'system')
+  // 处理历史消息，确保格式正确
+  const historyMessages = chatMessages.value
+      .filter(msg => !msg.thinking && !msg.streaming && msg.role !== 'system')
       .map(msg => {
         if (msg.role === 'assistant' && typeof msg.content === 'object') {
           return {
             role: msg.role,
             content: Array.isArray(msg.content.answer)
-              ? msg.content.answer.join('\n')
-              : msg.content.answer
+                ? msg.content.answer.join('\n')
+                : msg.content.answer
           };
         }
         return {
@@ -201,67 +403,123 @@ const sendMessage = async () => {
         };
       });
 
-    const response = await axios.post('http://localhost:8000/hybridrag', {
-      request: currentQuestion,
-      model: 'deepseek',
-      flow: false,
-      filename: currentFile.value.name,
-      messages: historyMessages
+  // 添加思考中的消息或初始化流式输出的容器
+  if (enableStreamOutput.value) {
+    // 流式输出模式，显示初始化的空消息
+    chatMessages.value.push({
+      role: 'assistant',
+      content: {
+        answer: '',
+        material: ''
+      },
+      streaming: true // 标记为流式输出中
     });
 
-    // 检查响应是否有效
-    if (!response || !response.data) {
-      throw new Error('服务器响应无效');
-    }
+    // 启用自动滚动
+    autoScroll.value = true;
+    // 自动滚动到底部
+    scrollToBottom();
 
-    // 检查响应状态
-    if (response.data.status === 'processing') {
-      ElMessage.warning('文件正在处理中，请稍后再试');
-      chatMessages.value = chatMessages.value.filter(msg => !msg.thinking);
-      return;
-    } else if (response.data.status === 'error') {
-      ElMessage.error(response.data.message || '文件处理失败');
-      chatMessages.value = chatMessages.value.filter(msg => !msg.thinking);
-      return;
-    }
+    // 使用流式处理函数，连接到新的流式端点
+    const streamingIndex = chatMessages.value.length - 1;
+    await processStreamResponse('http://localhost:8000/hybridrag/stream', {
+      request: currentQuestion,
+      model: 'deepseek',
+      flow: true,
+      filename: currentFile.value.name,
+      messages: historyMessages
+    }, streamingIndex);
+  } else {
+    // 非流式输出模式
+    // 添加思考中的消息
+    chatMessages.value.push({ role: 'assistant', content: '思考中...', thinking: true });
 
-    // 检查结果是否存在
-    if (!response.data.result) {
-      throw new Error('服务器返回结果为空');
-    }
+    // 启用自动滚动
+    autoScroll.value = true;
+    // 自动滚动到底部
+    scrollToBottom();
 
-    const thinkingIndex = chatMessages.value.findIndex(msg => msg.thinking);
-    if (thinkingIndex !== -1) {
-      chatMessages.value[thinkingIndex] = {
-        role: 'assistant',
-        content: {
-          answer: response.data.result.answer,
-          material: response.data.result.material
-        }
-      };
-    }
+    try {
+      const response = await axios.post('http://localhost:8000/hybridrag', {
+        request: currentQuestion,
+        model: 'deepseek',
+        flow: false,
+        filename: currentFile.value.name,
+        messages: historyMessages
+      }, {
+        signal: abortController.value ? abortController.value.signal : undefined
+      });
 
-    // 保存聊天记录到localStorage
-    if (currentFile.value?.name) {
-      const chatHistory = chatMessages.value.filter(msg => !msg.thinking);
-      localStorage.setItem(`chat_${currentFile.value.name}`, JSON.stringify(chatHistory));
-    }
-  } catch (error) {
-    console.error('获取RAG回复失败:', error);
-    chatMessages.value = chatMessages.value.filter(msg => !msg.thinking);
-    if (error.response) {
-      if (error.response.status === 422) {
-        ElMessage.error('请求参数错误：' + (error.response.data.detail?.[0]?.msg || '未知错误'));
-      } else {
-        ElMessage.error(`服务器错误: ${error.response.status} - ${error.response.data?.message || '未知错误'}`);
+      // 检查响应是否有效
+      if (!response || !response.data) {
+        throw new Error('服务器响应无效');
       }
-    } else if (error.message) {
-      ElMessage.error(error.message);
-    } else {
-      ElMessage.error('获取回复失败，请稍后重试');
+
+      // 检查响应状态
+      if (response.data.status === 'processing') {
+        ElMessage.warning('文件正在处理中，请稍后再试');
+        chatMessages.value = chatMessages.value.filter(msg => !msg.thinking && !msg.streaming);
+        return;
+      } else if (response.data.status === 'error') {
+        ElMessage.error(response.data.message || '文件处理失败');
+        chatMessages.value = chatMessages.value.filter(msg => !msg.thinking && !msg.streaming);
+        return;
+      }
+
+      // 检查结果是否存在
+      if (!response.data.result) {
+        throw new Error('服务器返回结果为空');
+      }
+
+      // 非流式输出模式，替换"思考中"的消息
+      const thinkingIndex = chatMessages.value.findIndex(msg => msg.thinking);
+      if (thinkingIndex !== -1) {
+        chatMessages.value[thinkingIndex] = {
+          role: 'assistant',
+          content: {
+            answer: response.data.result.answer,
+            material: response.data.result.material
+          }
+        };
+      }
+
+      // 如果启用自动滚动，自动滚到最新消息
+      if (autoScroll.value) {
+        scrollToBottom();
+      }
+
+      // 保存聊天记录到localStorage
+      if (currentFile.value?.name) {
+        const chatHistory = chatMessages.value.filter(msg => !msg.thinking && !msg.streaming);
+        localStorage.setItem(`chat_${currentFile.value.name}`, JSON.stringify(chatHistory));
+      }
+    } catch (error) {
+      if (error.name === 'CanceledError' || error.name === 'AbortError') {
+        // 请求被取消，不需要显示错误信息
+        return;
+      }
+      console.error('获取RAG回复失败:', error);
+      chatMessages.value = chatMessages.value.filter(msg => !msg.thinking && !msg.streaming);
+      if (error.response) {
+        if (error.response.status === 422) {
+          ElMessage.error('请求参数错误：' + (error.response.data.detail?.[0]?.msg || '未知错误'));
+        } else {
+          ElMessage.error(`服务器错误: ${error.response.status} - ${error.response.data?.message || '未知错误'}`);
+        }
+      } else if (error.message) {
+        ElMessage.error(error.message);
+      } else {
+        ElMessage.error('获取回复失败，请稍后重试');
+      }
+    } finally {
+      chatLoading.value = false;
+      abortController.value = null;
+
+      // 如果启用自动滚动，自动滚到最新消息
+      if (autoScroll.value) {
+        scrollToBottom();
+      }
     }
-  } finally {
-    chatLoading.value = false;
   }
 };
 
@@ -316,44 +574,51 @@ const onUploadSuccess = (response, file) => {
 }
 
 // 添加检查文件处理状态的函数
-const checkFileProcessingStatus = (file) => {
-  if (!file) return;
+const checkFileProcessingStatus = async (file) => {
+  try {
+    // 文件名
+    const filename = file.name;
+    const checkInterval = 3000; // 检查间隔（毫秒）
 
-  // 创建定时器，每3秒检查一次处理状态
-  const checkStatus = async () => {
-    try {
-      // 修改为正确的API路径
-      const response = await axios.get(`http://localhost:8000/processing-status/${file.name}`);
+    // 第一次立即检查
+    await updateFileStatus(file);
 
-      if (response.data && response.data.status) {
-        const status = response.data.status;
+    // 持续检查直到处理完成或失败
+    const intervalId = setInterval(async () => {
+      const updated = await updateFileStatus(file);
 
-        if (status === 'completed') {
-          // 处理完成
-          file.status = 'completed';  // 使用 completed 而不是 success
-          ElMessage.success(`文件 ${file.name} 处理完成`);
-          return; // 停止检查
-        } else if (status.startsWith('error')) {
-          // 处理出错
-          file.status = 'error';
-          ElMessage.error(`文件 ${file.name} 处理失败: ${status.replace('error: ', '')}`);
-          return; // 停止检查
-        }
-        // 如果仍在处理中，继续轮询
-        setTimeout(checkStatus, 3000);
-      } else {
-        // 状态未知，继续轮询
-        setTimeout(checkStatus, 3000);
+      // 如果状态是completed或error，停止检查
+      if (updated && (file.status === 'completed' || file.status === 'error')) {
+        clearInterval(intervalId);
       }
-    } catch (error) {
-      console.error('检查处理状态失败:', error);
-      // 发生错误时，继续轮询，但增加间隔时间
-      setTimeout(checkStatus, 5000);
-    }
-  };
+    }, checkInterval);
 
-  // 开始检查
-  setTimeout(checkStatus, 2000);
+    // 10分钟后强制停止检查
+    setTimeout(() => {
+      clearInterval(intervalId);
+    }, 10 * 60 * 1000);
+  } catch (error) {
+    console.error('检查文件处理状态失败:', error);
+  }
+};
+
+// 添加一个更新文件状态的函数
+const updateFileStatus = async (file) => {
+  try {
+    const response = await axios.get(`http://localhost:8000/processing-status/${file.name}`);
+    if (response.data) {
+      // 更新文件状态
+      file.status = response.data.status;
+      if (response.data.display_status) {
+        file.display_status = response.data.display_status;
+      }
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('获取文件状态失败:', error);
+    return false;
+  }
 };
 
 const onUploadError = (error, file) => {
@@ -368,8 +633,22 @@ const onUploadError = (error, file) => {
 const viewFileResult = async (file) => {
   if (file.status === 'completed') {
     try {
+      // 如果切换了文件，保存当前文件的聊天记录
+      if (currentChatFile.value && currentChatFile.value !== file.name) {
+        const chatHistory = chatMessages.value.filter(msg => !msg.thinking);
+        localStorage.setItem(`chat_${currentChatFile.value}`, JSON.stringify(chatHistory));
+      }
+
+      // 如果当前有正在进行的请求，取消它
+      if (abortController.value) {
+        abortController.value.abort();
+        abortController.value = null;
+        chatLoading.value = false;
+      }
+
       activeView.value = 'result';
       currentFile.value = file;
+      currentChatFile.value = file.name;
 
       fileContentLoading.value = true;
       fileContent.value = '';
@@ -408,6 +687,13 @@ const viewFileResult = async (file) => {
           { role: 'system', content: '我是基于当前文档的HybridRAG助手，可以回答与文档相关的问题。' }
         ];
       }
+
+      // 如果当前是RAG标签，自动滚动到最新消息
+      if (activeTab.value === 'rag') {
+        nextTick(() => {
+          scrollToBottom();
+        });
+      }
     } catch (error) {
       ElMessage.error('获取结果失败');
       console.error('获取结果失败:', error);
@@ -417,12 +703,20 @@ const viewFileResult = async (file) => {
 
 // 关闭结果视图
 const closeResultView = () => {
-  if (currentFile.value?.name) {
+  // 如果当前有正在进行的请求，取消它
+  if (abortController.value) {
+    abortController.value.abort();
+    abortController.value = null;
+    chatLoading.value = false;
+  }
+
+  if (currentChatFile.value) {
     const chatHistory = chatMessages.value.filter(msg => !msg.thinking);
-    localStorage.setItem(`chat_${currentFile.value.name}`, JSON.stringify(chatHistory));
+    localStorage.setItem(`chat_${currentChatFile.value}`, JSON.stringify(chatHistory));
   }
   activeView.value = 'upload';
   knowledgeGraphData.value = null;
+  currentChatFile.value = null;
   chatMessages.value = [
     { role: 'system', content: '我是基于当前文档的HybridRAG助手，可以回答与文档相关的问题。' }
   ];
@@ -459,23 +753,54 @@ const togglePanelVisibility = (panel) => {
 const switchTab = (tab) => {
   if (panelVisible[tab]) {
     activeTab.value = tab;
+
+    // 在切换到rag标签时，自动滚动到最新消息
+    if (tab === 'rag') {
+      nextTick(() => {
+        scrollToBottom();
+      });
+    }
   }
 };
 
 const getStatusText = (status) => {
-  switch(status) {
-    case 'uploading': return '上传中';
-    case 'processing': return '处理中';
-    case 'completed': return '已完成';
-    case 'error': return '失败';
-    default: return '未知';
+  // 检查是否有display_status字段（服务器返回的中文状态）
+  if (typeof status === 'object' && status.display_status) {
+    return status.display_status;
   }
+
+  // 状态映射
+  const statusMap = {
+    'uploading': '上传中',
+    'processing': '文件处理中',
+    'processing_kg': '知识图谱准备中',
+    'building_kg': '知识图谱构建中',
+    'converting_kg': '知识图谱转换中',
+    'drawing_kg': '知识图谱绘制中',
+    'saving_kg': '知识图谱保存中',
+    'completed': '已完成',
+    'error': '失败'
+  };
+
+  return statusMap[status] || '未知';
 }
 
 const getFileIcon = (status) => {
-  switch(status) {
-    case 'uploading': return Loading;
-    case 'processing': return Loading;
+  // 获取状态值
+  const statusValue = typeof status === 'object' ? status.status : status;
+
+  // 所有处理中状态都使用Loading图标
+  if (statusValue === 'uploading' ||
+      statusValue === 'processing' ||
+      statusValue === 'processing_kg' ||
+      statusValue === 'building_kg' ||
+      statusValue === 'converting_kg' ||
+      statusValue === 'drawing_kg' ||
+      statusValue === 'saving_kg') {
+    return Loading;
+  }
+
+  switch(statusValue) {
     case 'completed': return SuccessFilled;
     case 'error': return Document;
     default: return Document;
@@ -525,7 +850,7 @@ const handleFilter = () => {
   if (searchValue.value) {
     const searchText = searchValue.value.toLowerCase();
     filtered = filtered.filter(file =>
-      file.name.toLowerCase().includes(searchText)
+        file.name.toLowerCase().includes(searchText)
     );
   }
 
@@ -540,7 +865,7 @@ const handleFilter = () => {
   // 应用状态过滤
   if (statusFilter.value !== 'all') {
     filtered = filtered.filter(file =>
-      file.status === statusFilter.value
+        file.status === statusFilter.value
     );
   }
 
@@ -583,14 +908,108 @@ const handleCloseAll = () => {
 
 // 添加当前选中文件的ID
 const currentFileId = ref(null);
+
+// 查看文件内容
+const viewFile = async (file) => {
+  try {
+    if (file.status !== 'completed') {
+      ElMessage.warning(`文件 ${file.name} 正在处理中: ${file.display_status || getStatusText(file.status)}`);
+      return;
+    }
+
+    currentFile.value = file;
+    activeView.value = 'result';
+    activeTab.value = 'original'; // 默认显示原文件
+
+    if (fileListExpand.value && window.innerWidth < 1200) {
+      fileListExpand.value = false;
+    }
+
+    // 加载文件内容
+    await loadFileContent(file);
+
+    // 加载知识图谱
+    await loadKnowledgeGraph(file);
+
+    // 准备文件的聊天状态
+    prepareChatState(file);
+  } catch (error) {
+    console.error('查看文件失败:', error);
+    ElMessage.error('查看文件失败');
+  }
+};
+
+// 准备文件的聊天状态
+const prepareChatState = (file) => {
+  // 如果该文件没有聊天记录，初始化一个
+  if (!fileChatStates.value[file.name]) {
+    fileChatStates.value[file.name] = {
+      messages: [
+        { role: 'system', content: `我是基于文档《${file.name}》的HybridRAG助手，可以回答与文档相关的问题。` }
+      ],
+      lastActive: new Date().getTime()
+    };
+  } else {
+    // 更新最后活动时间
+    fileChatStates.value[file.name].lastActive = new Date().getTime();
+  }
+
+  // 设置当前聊天文件
+  currentChatFile.value = file;
+
+  // 从文件状态中加载聊天记录
+  chatMessages.value = [...fileChatStates.value[file.name].messages];
+
+  // 如果切换到RAG标签，自动滚动到底部
+  if (activeTab.value === 'rag') {
+    nextTick(() => {
+      scrollToBottom();
+    });
+  }
+};
+
+// 加载文件内容
+const loadFileContent = async (file) => {
+  fileContentLoading.value = true;
+  fileContent.value = '';
+
+  try {
+    const response = await axios.get(`http://localhost:8000/file-content/${file.name}`);
+    if (response.data && response.data.content) {
+      fileContent.value = response.data.content;
+    }
+  } catch (error) {
+    console.error('获取文件内容失败:', error);
+    ElMessage.warning('获取文件内容失败');
+  } finally {
+    fileContentLoading.value = false;
+  }
+};
+
+// 加载知识图谱
+const loadKnowledgeGraph = async (file) => {
+  if (!file || !file.name) return;
+
+  try {
+    knowledgeGraphLoading.value = true;
+    await fetchKnowledgeGraph(file.name);
+  } catch (error) {
+    console.error('加载知识图谱失败:', error);
+    ElMessage.warning('加载知识图谱失败');
+  } finally {
+    knowledgeGraphLoading.value = false;
+  }
+};
 </script>
 
 <template>
   <div class="main-container">
     <side-bar
-      ref="sideBarRef"
-      v-model:fileListExpand="fileListExpand"
-      @closeAll="handleCloseAll"
+        ref="sideBarRef"
+        v-model:fileListExpand="fileListExpand"
+        v-model:enableStreamOutput="enableStreamOutput"
+        @update:enableStreamOutput="saveStreamSetting"
+        @closeAll="handleCloseAll"
     />
     <div class="main-content">
       <el-drawer v-model="fileListExpand" direction="ltr" :modal="false" :show-close="false" :size="280">
@@ -606,13 +1025,13 @@ const currentFileId = ref(null);
         <template #default>
           <div v-if="!isSearch" class="query-button">
             <el-popover
-              v-model:visible="filterVisible"
-              :show-arrow="false"
-              placement="top-end"
-              popper-class="custom-popover"
-              trigger="click"
-              :show-after="200"
-              popper-style="width:360px"
+                v-model:visible="filterVisible"
+                :show-arrow="false"
+                placement="top-end"
+                popper-class="custom-popover"
+                trigger="click"
+                :show-after="200"
+                popper-style="width:360px"
             >
               <template #reference>
                 <div class="filter">
@@ -653,26 +1072,26 @@ const currentFileId = ref(null);
           </div>
           <div v-else class="search-input">
             <el-input
-              v-model="searchValue"
-              placeholder="请输入文件名称"
-              clearable
-              @input="handleSearch"
+                v-model="searchValue"
+                placeholder="请输入文件名称"
+                clearable
+                @input="handleSearch"
             />
             <el-button link @click="isSearch=false">取消</el-button>
           </div>
           <div class="file-list">
             <template v-if="filteredFileList.length > 0">
               <div
-                v-for="file in filteredFileList"
-                :key="file.name"
-                class="file-item"
-                :class="{
+                  v-for="file in filteredFileList"
+                  :key="file.name"
+                  class="file-item"
+                  :class="{
                   'can-click': file.status === 'completed',
                   'active': currentFile?.name === file.name
                 }"
-                @dblclick="viewFileResult(file)"
-                @mouseenter="currentFileId = file.name"
-                @mouseleave="currentFileId = null"
+                  @dblclick="viewFileResult(file)"
+                  @mouseenter="currentFileId = file.name"
+                  @mouseleave="currentFileId = null"
               >
                 <div class="file-info">
                   <el-icon class="file-icon" :class="file.status">
@@ -680,10 +1099,10 @@ const currentFileId = ref(null);
                   </el-icon>
                   <div class="file-name-container">
                     <el-tooltip
-                      :content="file.name"
-                      placement="right"
-                      :show-after="500"
-                      :hide-after="0"
+                        :content="file.name"
+                        placement="right"
+                        :show-after="500"
+                        :hide-after="0"
                     >
                       <div class="file-name">{{ file.name }}</div>
                     </el-tooltip>
@@ -694,15 +1113,15 @@ const currentFileId = ref(null);
                 </div>
                 <div class="file-actions">
                   <div class="file-status" :class="file.status">
-                    {{ getStatusText(file.status) }}
+                    {{ file.display_status || getStatusText(file.status) }}
                   </div>
                   <transition name="fade">
                     <div v-if="currentFileId === file.name && file.status === 'completed'" class="delete-action">
                       <img
-                        src="@/assets/icons/svg/delete.svg"
-                        alt="删除"
-                        class="delete-icon"
-                        @click.stop="deleteFile(file)"
+                          src="@/assets/icons/svg/delete.svg"
+                          alt="删除"
+                          class="delete-icon"
+                          @click.stop="deleteFile(file)"
                       />
                     </div>
                   </transition>
@@ -846,9 +1265,9 @@ const currentFileId = ref(null);
                 </div>
                 <div v-else-if="knowledgeGraphData" class="knowledge-graph-content">
                   <iframe
-                    :srcdoc="knowledgeGraphData"
-                    class="result-iframe"
-                    frameborder="0"
+                      :srcdoc="knowledgeGraphData"
+                      class="result-iframe"
+                      frameborder="0"
                   ></iframe>
                 </div>
                 <div v-else class="empty-content">
@@ -867,18 +1286,23 @@ const currentFileId = ref(null);
               </div>
               <div class="panel-content">
                 <div class="chat-container">
-                  <div class="chat-messages">
+                  <div class="chat-messages" ref="chatMessagesContainer" @scroll="handleChatScroll">
                     <div v-for="(message, index) in chatMessages" :key="index"
-                         :class="['message', message.role, {'thinking': message.thinking}]">
+                         :class="['message', message.role, {'thinking': message.thinking, 'streaming': message.streaming}]">
                       <div v-if="message.role === 'user'" class="avatar user-avatar">
                         <span>U</span>
                       </div>
                       <div v-else-if="message.role === 'assistant'" class="avatar assistant-avatar">
                         <span>AI</span>
                       </div>
-                      <div class="message-content" :class="{'thinking': message.thinking}">
+                      <div class="message-content" :class="{'thinking': message.thinking, 'streaming': message.streaming}">
                         <div v-if="message.thinking" class="thinking-indicator">
                           <span></span><span></span><span></span>
+                        </div>
+                        <div v-else-if="message.streaming" class="streaming-content">
+                          <div class="answer">{{ Array.isArray(message.content.answer) ? message.content.answer.join('') : message.content.answer }}</div>
+                          <div class="cursor-blink"></div>
+                          <div v-if="streamingStatus" class="streaming-status">{{ streamingStatus }}</div>
                         </div>
                         <div v-else>
                           <template v-if="typeof message.content === 'object'">
@@ -895,18 +1319,36 @@ const currentFileId = ref(null);
                       </div>
                     </div>
                   </div>
+
+                  <div
+                      v-if="showScrollButton"
+                      class="scroll-to-bottom-btn"
+                      @click="scrollToBottom"
+                  >
+                    <el-icon><ArrowDown /></el-icon>
+                  </div>
+
                   <div class="chat-input">
-                    <el-input
-                        v-model="userInput"
-                        type="textarea"
-                        :rows="2"
-                        placeholder="输入问题..."
-                        :disabled="chatLoading"
-                        @keyup.enter.ctrl="sendMessage"
-                    />
-                    <el-button type="primary" :disabled="chatLoading" @click="sendMessage">
-                      发送
-                    </el-button>
+                    <div class="input-actions">
+                      <el-input
+                          v-model="userInput"
+                          type="textarea"
+                          :rows="2"
+                          placeholder="输入问题..."
+                          :disabled="chatLoading"
+                          @keyup.enter.ctrl="sendMessage"
+                      />
+                      <div class="button-group">
+                        <el-button v-if="chatLoading && enableStreamOutput.value"
+                                   type="warning"
+                                   @click="stopRagResponse">
+                          停止生成
+                        </el-button>
+                        <el-button type="primary" :disabled="chatLoading" @click="sendMessage">
+                          发送
+                        </el-button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -920,17 +1362,20 @@ const currentFileId = ref(null);
             <svg-icon icon-name="history" icon-class="history-icon" size="20px"/>
           </template>
           <template #default>
-            <div class="theme-header">主题设置</div>
+            <div class="theme-header">设置</div>
             <div class="theme-content">
-              <div
-                v-for="theme in themeOptions"
-                :key="theme.value"
-                class="theme-item"
-                :class="{ active: currentTheme === theme.value }"
-                @click="changeTheme(theme.value)"
-              >
-                <div class="theme-preview" :class="theme.value"></div>
-                <span>{{ theme.name }}</span>
+              <div class="setting-section">
+                <div class="setting-title">主题</div>
+                <div
+                    v-for="theme in themeOptions"
+                    :key="theme.value"
+                    class="theme-item"
+                    :class="{ active: currentTheme === theme.value }"
+                    @click="changeTheme(theme.value)"
+                >
+                  <div class="theme-preview" :class="theme.value"></div>
+                  <span>{{ theme.name }}</span>
+                </div>
               </div>
             </div>
           </template>
@@ -1632,8 +2077,18 @@ const currentFileId = ref(null);
                 .chat-input {
                   padding: 16px;
                   border-top: 1px solid var(--el-border-color-light);
-                  display: flex;
-                  gap: 12px;
+
+                  .input-actions {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+
+                    .button-group {
+                      display: flex;
+                      justify-content: flex-end;
+                      gap: 10px;
+                    }
+                  }
 
                   :deep(.el-textarea) {
                     .el-textarea__inner {
@@ -1823,6 +2278,42 @@ const currentFileId = ref(null);
   padding: 0 16px;
   margin-bottom: 16px;
 
+  .setting-section {
+    margin-bottom: 20px;
+
+    .setting-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--el-text-color-primary);
+      margin-bottom: 12px;
+      border-top: 1px solid var(--el-border-color-lighter);
+      padding-top: 16px;
+
+      &:first-child {
+        border-top: none;
+        padding-top: 0;
+      }
+    }
+
+    .setting-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+
+      &:hover {
+        background-color: var(--el-fill-color-light);
+      }
+
+      span {
+        font-size: 14px;
+        color: var(--el-text-color-primary);
+      }
+    }
+  }
+
   .theme-item {
     display: flex;
     align-items: center;
@@ -1871,6 +2362,94 @@ const currentFileId = ref(null);
     span {
       font-size: 14px;
     }
+  }
+}
+
+// 添加滚动按钮样式
+.chat-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+
+  .scroll-to-bottom-btn {
+    position: absolute;
+    bottom: 80px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: var(--el-color-primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 10;
+    transition: all 0.3s ease;
+
+    &:hover {
+      background-color: var(--el-color-primary-light-3);
+      transform: translateY(-2px);
+    }
+
+    .el-icon {
+      font-size: 20px;
+    }
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scroll-behavior: smooth;
+
+    .message {
+      display: flex;
+
+      &.streaming {
+        .message-content {
+          .streaming-content {
+            display: flex;
+            flex-direction: column;
+
+            .answer {
+              white-space: pre-wrap;
+              word-break: break-word;
+            }
+
+            .cursor-blink {
+              display: inline-block;
+              width: 2px;
+              height: 16px;
+              background-color: var(--el-color-primary);
+              margin-left: 2px;
+              animation: cursor-blink 0.8s infinite;
+            }
+
+            .streaming-status {
+              font-size: 12px;
+              color: var(--el-color-info);
+              margin-top: 4px;
+              font-style: italic;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@keyframes cursor-blink {
+  0%, 100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
@@ -2031,5 +2610,54 @@ const currentFileId = ref(null);
     padding-top: 16px;
     border-top: 1px solid var(--el-border-color-light);
   }
+}
+
+.message {
+  &.streaming {
+    .message-content {
+      .streaming-content {
+        display: flex;
+        align-items: center;
+
+        .answer {
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+
+        .cursor-blink {
+          display: inline-block;
+          width: 2px;
+          height: 16px;
+          background-color: var(--el-color-primary);
+          margin-left: 2px;
+          animation: cursor-blink 0.8s infinite;
+        }
+      }
+    }
+  }
+}
+
+@keyframes cursor-blink {
+  0%, 100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+// 添加流式输出状态提示样式
+.streaming-status {
+  font-size: 12px;
+  color: var(--el-color-info);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+// 优化聊天内容区域滚动
+.chat-messages {
+  height: calc(100% - 100px);
+  overflow-y: auto;
+  scroll-behavior: smooth;
 }
 </style>
