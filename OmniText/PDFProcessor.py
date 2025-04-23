@@ -1,3 +1,4 @@
+import base64
 import camelot
 import re
 import fitz
@@ -12,12 +13,18 @@ except ImportError:
 
 
 class PDFProcessor:
-    def __init__(self, output_dir: str = "output", image_dir: str = "images"):
+    def __init__(self, output_dir: str = "output", image_dir: str = "images", vl_client=None):
         self.output_dir = output_dir
         self.image_dir = image_dir
         self.results = {}  # 存储结构：{filename: content_list}
+        self.vl_client = vl_client
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.image_dir, exist_ok=True)
+
+    #  base 64 编码格式
+    def encode_image(self, image_path):
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode("utf-8")
 
     @staticmethod
     def _clean_text(text: str) -> str:
@@ -125,95 +132,136 @@ class PDFProcessor:
 
         return image_info_list
 
-    def _process_pdf(self, pdf_path: str) -> List[str]:
-        tables = camelot.read_pdf(pdf_path, pages='all', flavor='lattice')
-        doc = fitz.open(pdf_path)
+    def _process_pdf(self, pdf_path: str, use_img2txt: bool = False) -> List[str]:
+        # 确保use_img2txt是布尔类型
+        if isinstance(use_img2txt, str):
+            use_img2txt_str = use_img2txt.lower().strip()
+            use_img2txt = use_img2txt_str == 'open' or use_img2txt_str == 'true' or use_img2txt_str == '1' or use_img2txt_str == 'yes'
+        else:
+            use_img2txt = bool(use_img2txt)
+
+        tqdm.write(f"处理PDF {os.path.basename(pdf_path)} 使用图片文本识别: {use_img2txt}")
+
+        try:
+            tables = camelot.read_pdf(pdf_path, pages='all', flavor='lattice')
+        except Exception as e:
+            tqdm.write(f"无法提取表格: {str(e)}")
+            tables = []  # 使用空列表表示无法提取表格
+
+        try:
+            doc = fitz.open(pdf_path)
+        except Exception as e:
+            tqdm.write(f"无法打开PDF文件: {str(e)}")
+            return [f"无法处理文件 {os.path.basename(pdf_path)}: {str(e)}"]
+
         full_content = []
         table_meta = []
 
-        for idx, table in enumerate(tables):
-            page_num = int(table.parsing_report['page']) - 1
-            x1, y1, x2, y2 = table._bbox
-            table_meta.append({
-                "page": page_num,
-                "bbox": (x1, y1, x2, y2),
-                "index": idx
-            })
+        if tables and len(tables) > 0:
+            for idx, table in enumerate(tables):
+                try:
+                    page_num = int(table.parsing_report['page']) - 1
+                    x1, y1, x2, y2 = table._bbox
+                    table_meta.append({
+                        "page": page_num,
+                        "bbox": (x1, y1, x2, y2),
+                        "index": idx
+                    })
+                except Exception as e:
+                    tqdm.write(f"处理表格信息失败: {str(e)}")
+                    # 继续处理下一个表格
 
         # 添加页面处理进度条
         with tqdm(total=len(doc), desc=f"处理 {os.path.basename(pdf_path)}",
                   leave=False, unit='page') as page_pbar:
             for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                page_rect = page.rect
-                page_height = page_rect.height
+                try:
+                    page = doc.load_page(page_num)
+                    page_rect = page.rect
+                    page_height = page_rect.height
 
-                current_tables = []
-                for table in table_meta:
-                    if table["page"] == page_num:
-                        x1, y1, x2, y2 = table["bbox"]
-                        fitz_bbox = (
-                            x1,
-                            page_height - y2,
-                            x2,
-                            page_height - y1
-                        )
-                        current_tables.append({
-                            "fitz_bbox": fitz_bbox,
-                            "index": table["index"]
+                    current_tables = []
+                    for table in table_meta:
+                        if table["page"] == page_num:
+                            x1, y1, x2, y2 = table["bbox"]
+                            fitz_bbox = (
+                                x1,
+                                page_height - y2,
+                                x2,
+                                page_height - y1
+                            )
+                            current_tables.append({
+                                "fitz_bbox": fitz_bbox,
+                                "index": table["index"]
+                            })
+
+                    try:
+                        text_blocks = page.get_text("blocks")
+                    except Exception as e:
+                        tqdm.write(f"页面 {page_num + 1} 文本提取失败: {str(e)}")
+                        text_blocks = []
+
+                    try:
+                        image_blocks = self._extract_images(page, page_num)
+                    except Exception as e:
+                        tqdm.write(f"页面 {page_num + 1} 图像提取失败: {str(e)}")
+                        image_blocks = []
+
+                    all_blocks = []
+                    for block in text_blocks:
+                        all_blocks.append({
+                            "type": "text",
+                            "bbox": (block[0], block[1], block[2], block[3]),
+                            "content": self._clean_text(block[4])
+                        })
+                    for img in image_blocks:
+                        all_blocks.append({
+                            "type": "image",
+                            "bbox": img["bbox"],
+                            "content": f"<image>{img['path']}</image>"
                         })
 
-                text_blocks = page.get_text("blocks")
-                image_blocks = self._extract_images(page, page_num)
+                    all_blocks.sort(key=lambda x: (x["bbox"][1], x["bbox"][0]))
 
-                all_blocks = []
-                for block in text_blocks:
-                    all_blocks.append({
+                    processed_tables = set()
+                    for block in all_blocks:
+                        block_bbox = block["bbox"]
+
+                        if block_bbox[1] < page_rect.height * 0.07:
+                            continue
+
+                        in_table = False
+                        for table in sorted(current_tables, key=lambda t: t["fitz_bbox"][1]):
+                            t_bbox = table["fitz_bbox"]
+                            if (block_bbox[0] >= t_bbox[0] and
+                                    block_bbox[2] <= t_bbox[2] and
+                                    block_bbox[1] >= t_bbox[1] and
+                                    block_bbox[3] <= t_bbox[3]):
+                                if table["index"] not in processed_tables:
+                                    full_content.append({"type": "table", "index": table["index"]})
+                                    processed_tables.add(table["index"])
+                                in_table = True
+                                break
+
+                        if not in_table:
+                            if block["type"] == "text" and block["content"]:
+                                full_content.append({
+                                    "type": "text",
+                                    "content": block["content"]
+                                })
+                            elif block["type"] == "image":
+                                full_content.append({
+                                    "type": "image",
+                                    "content": block["content"]
+                                })
+                except Exception as e:
+                    tqdm.write(f"处理页面 {page_num + 1} 时出错: {str(e)}")
+                    full_content.append({
                         "type": "text",
-                        "bbox": (block[0], block[1], block[2], block[3]),
-                        "content": self._clean_text(block[4])
+                        "content": f"[页面 {page_num + 1} 处理失败: {str(e)}]"
                     })
-                for img in image_blocks:
-                    all_blocks.append({
-                        "type": "image",
-                        "bbox": img["bbox"],
-                        "content": f"<image>{img['path']}</image>"
-                    })
-
-                all_blocks.sort(key=lambda x: (x["bbox"][1], x["bbox"][0]))
-
-                processed_tables = set()
-                for block in all_blocks:
-                    block_bbox = block["bbox"]
-
-                    if block_bbox[1] < page_rect.height * 0.07:
-                        continue
-
-                    in_table = False
-                    for table in sorted(current_tables, key=lambda t: t["fitz_bbox"][1]):
-                        t_bbox = table["fitz_bbox"]
-                        if (block_bbox[0] >= t_bbox[0] and
-                                block_bbox[2] <= t_bbox[2] and
-                                block_bbox[1] >= t_bbox[1] and
-                                block_bbox[3] <= t_bbox[3]):
-                            if table["index"] not in processed_tables:
-                                full_content.append({"type": "table", "index": table["index"]})
-                                processed_tables.add(table["index"])
-                            in_table = True
-                            break
-
-                    if not in_table:
-                        if block["type"] == "text" and block["content"]:
-                            full_content.append({
-                                "type": "text",
-                                "content": block["content"]
-                            })
-                        elif block["type"] == "image":
-                            full_content.append({
-                                "type": "image",
-                                "content": block["content"]
-                            })
-                page_pbar.update(1)
+                finally:
+                    page_pbar.update(1)
 
         final_output = []
         table_index = 0
@@ -221,21 +269,86 @@ class PDFProcessor:
             if item["type"] == "text":
                 final_output.append(item["content"])
             elif item["type"] == "image":
-                final_output.append(item["content"])
+                if use_img2txt and self.vl_client is not None:
+                    # 对图片进行多模态处理
+                    try:
+                        # print(item["content"])
+                        input_string = item["content"]
+                        content = re.search(r'<image>(.*?)</image>', input_string).group(1)
+                        # 获取文件类型
+                        file_type = content.split('.')[-1].lower()
+                        # 将xxxx/test.png替换为你本地图像的绝对路径
+                        base64_image = self.encode_image(content)
+                        completion = self.vl_client.chat.completions.create(
+                            model="qwen-vl-max-latest",
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": [{"type": "text", "text": "You are a helpful assistant."}]},
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {
+                                            "type": "image_url",
+                                            # 需要注意，传入Base64，图像格式（即image/{format}）需要与支持的图片列表中的Content Type保持一致。"f"是字符串格式化的方法。
+                                            # PNG图像：  f"data:image/png;base64,{base64_image}"
+                                            # JPEG图像： f"data:image/jpeg;base64,{base64_image}"
+                                            # WEBP图像： f"data:image/webp;base64,{base64_image}"
+                                            "image_url": {"url": f"data:image/{file_type};base64,{base64_image}"},
+                                        },
+                                        {"type": "text", "text": '''
+                                                    你是一个笔记图像理解助手，图片表达了什么? 请遵循以下指南：
+                                                    - 不要解释任何图中文字的概念
+                                                    - 用最简练的话告诉我图像的主要内容
+                                                    - 如果是图表请告诉我表的数据
+                                                    - 告诉我图片类型就不要继续解释这类图片的特点了，例如：知识图谱，照片，柱状图，表格等
+                                                    '''},
+                                    ],
+                                }
+                            ],
+                        )
+                        img_dcs = completion.choices[0].message.content
+                        result = f'<image>{img_dcs}</image>'
+                    except Exception as e:
+                        tqdm.write(f"图片处理失败: {str(e)}")
+                        # 如果处理失败，回退到不处理图片
+                        result = item["content"]
+                else:
+                    result = item["content"]
+
+                final_output.append(result)
             elif item["type"] == "table":
-                if table_index < len(tables):
-                    table = tables[table_index]
-                    processed = self._process_table_optimized(table.data)
-                    if not self._is_empty_table(processed):
-                        final_output.append(self._process_tables(processed))
-                    else:
-                        final_output.append("<table>表格解析失败</table>")
-                    table_index += 1
+                if tables and table_index < len(tables):
+                    try:
+                        table = tables[table_index]
+                        processed = self._process_table_optimized(table.data)
+                        if not self._is_empty_table(processed):
+                            final_output.append(self._process_tables(processed))
+                        else:
+                            final_output.append("<table>表格解析失败</table>")
+                        table_index += 1
+                    except Exception as e:
+                        tqdm.write(f"处理表格索引 {table_index} 失败: {str(e)}")
+                        final_output.append("<table>表格解析出错</table>")
+                        table_index += 1
+
+        if not final_output:
+            # 如果没有成功提取任何内容，返回一个错误信息
+            return [f"无法从文件 {os.path.basename(pdf_path)} 提取有效内容"]
 
         return final_output
 
-    def process(self, pdf_files: Union[str, List[str]]):
+    def process(self, pdf_files: Union[str, List[str]], use_img2txt=False):
         """处理多个PDF文件"""
+        # 确保use_img2txt是布尔类型
+        if isinstance(use_img2txt, str):
+            use_img2txt_str = use_img2txt.lower().strip()
+            use_img2txt = use_img2txt_str == 'open' or use_img2txt_str == 'true' or use_img2txt_str == '1' or use_img2txt_str == 'yes'
+        else:
+            use_img2txt = bool(use_img2txt)
+
+        tqdm.write(f"PDF处理器使用图片文本识别: {use_img2txt}")
+
         if isinstance(pdf_files, str):
             pdf_files = [pdf_files]
 
@@ -264,15 +377,25 @@ class PDFProcessor:
 
                     try:
                         with open(pdf_path, 'rb') as f:
-                            pass
+                            # 检查文件头部是否为有效的PDF文件
+                            header = f.read(5)
+                            if header != b'%PDF-':
+                                tqdm.write(f"无效的PDF文件: {pdf_path} (头部格式不正确)")
+                                continue
                     except PermissionError:
                         tqdm.write(f"文件无读取权限: {pdf_path}")
                         continue
+                    except Exception as e:
+                        tqdm.write(f"读取文件时出错: {pdf_path}, 错误: {str(e)}")
+                        continue
 
-                    content = self._process_pdf(pdf_path)
-                    filename = os.path.basename(pdf_path)
-                    self.results[filename] = content
-                    main_pbar.set_postfix(file=filename[:15])
+                    try:
+                        content = self._process_pdf(pdf_path, use_img2txt)
+                        filename = os.path.basename(pdf_path)
+                        self.results[filename] = content
+                        main_pbar.set_postfix(file=filename[:15])
+                    except Exception as e:
+                        tqdm.write(f"\n处理PDF内容时出错: {pdf_path}, 错误: {str(e)}")
                 except Exception as e:
                     tqdm.write(f"\n处理文件 {pdf_path} 时出错: {str(e)}")
                 finally:
@@ -282,7 +405,7 @@ class PDFProcessor:
         """
         保存处理结果到文本文件
         :param combine: 是否合并所有文件结果
-        :param output_path: 自定义输出路径（仅combine=True时有效）
+        :param output_path: 自定义输出路径（combine=True时为完整路径，combine=False时为文件名）
         """
         if not self.results:
             print("没有可保存的结果")
@@ -302,7 +425,18 @@ class PDFProcessor:
         else:
             # 分文件保存逻辑
             for filename, content in self.results.items():
-                final_path = os.path.join(self.output_dir, f"{os.path.splitext(filename)[0]}.txt")
+                if output_path:
+                    # 使用指定的输出路径
+                    # 如果output_path是完整路径，则直接使用
+                    if os.path.dirname(output_path):
+                        final_path = output_path
+                    # 如果output_path只是文件名，则拼接输出目录
+                    else:
+                        final_path = os.path.join(self.output_dir, output_path)
+                else:
+                    # 使用默认命名规则
+                    final_path = os.path.join(self.output_dir, f"{os.path.splitext(filename)[0]}.txt")
+
                 with open(final_path, "w", encoding="utf-8") as f:
                     f.write("\n".join(content))
                 print(f"保存到: {final_path}")

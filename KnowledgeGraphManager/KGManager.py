@@ -207,16 +207,16 @@ class KgManager:
             self.splitter.split_text)
 
         # 输出
-        print("新文本替换后的文本:")
-        print(replaced_new_text)
-
-        print("\n被删除的块:")
-        for bid, text in deleted_blocks:
-            print(f"{bid}: {text}")
-
-        print("\n新增的块:")
-        for bid, text in added_blocks:
-            print(f"{bid}: {text}")
+        # print("新文本替换后的文本:")
+        # print(replaced_new_text)
+        #
+        # print("\n被删除的块:")
+        # for bid, text in deleted_blocks:
+        #     print(f"{bid}: {text}")
+        #
+        # print("\n新增的块:")
+        # for bid, text in added_blocks:
+        #     print(f"{bid}: {text}")
         bids_to_remove = []
 
         # 被删除的块

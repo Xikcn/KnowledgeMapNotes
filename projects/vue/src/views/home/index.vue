@@ -54,10 +54,19 @@ const currentTheme = ref('default');
 
 // 添加RAG流式输出开关设置
 const enableStreamOutput = ref(false);
+// 添加PDF图片文本识别设置
+const useImg2txt = ref(false);
+// 添加笔记类型设置
+const noteType = ref('general');
 
 // 保存和获取流式输出设置
 const saveStreamSetting = () => {
-  localStorage.setItem('rag-stream-output', enableStreamOutput ? 'true' : 'false');
+  localStorage.setItem('rag-stream-output', enableStreamOutput.value ? 'true' : 'false');
+};
+
+// 保存图片文本识别设置
+const saveImg2txtSetting = () => {
+  localStorage.setItem('use-img2txt', useImg2txt.value ? 'true' : 'false');
 };
 
 // 自动滚动到底部功能
@@ -146,6 +155,10 @@ onMounted(async () => {
     const savedStreamSetting = localStorage.getItem('rag-stream-output');
     enableStreamOutput.value = savedStreamSetting === 'true';
 
+    // 加载图片文本识别设置
+    const savedImg2txtSetting = localStorage.getItem('use-img2txt');
+    useImg2txt.value = savedImg2txtSetting === 'true';
+    
     const response = await axios.get('http://localhost:8000/list-files');
     if (response.data && Array.isArray(response.data.files)) {
       // 将历史文件添加到文件列表，保持原始文件名和状态
@@ -904,28 +917,23 @@ const rebuildKnowledgeGraph = async (file) => {
       targetFile.percentage = 0;
     }
     
-    // 从uploads文件夹获取文件（假设文件仍然存在）
+    // 使用新的rebuild API端点
     const formData = new FormData();
-    
-    // 使用fetch API获取文件内容
-    const fileResponse = await fetch(`http://localhost:8000/file-content/${file.name}`);
-    const fileContent = await fileResponse.text();
-    
-    // 创建一个新的Blob对象
-    const fileBlob = new Blob([fileContent], { type: 'text/plain' });
-    
-    // 将Blob添加到FormData
-    formData.append('file', fileBlob, file.name);
+    formData.append('filename', file.name);
     formData.append('noteType', noteType.value);
+    // 显式使用字符串值
+    const img2txtValue = useImg2txt.value ? 'true' : 'false';
+    formData.append('use_img2txt', img2txtValue);
+    
+    console.log('重建使用的参数:', {
+      filename: file.name,
+      noteType: noteType.value, 
+      use_img2txt: img2txtValue,
+      useImg2txt原始值: useImg2txt.value
+    });
     
     // 发送重新构建请求
-    const response = await axios.post('http://localhost:8000/upload', formData, {
-      onUploadProgress: (event) => {
-        if (targetFile) {
-          targetFile.percentage = Math.round((event.loaded / event.total) * 100);
-        }
-      }
-    });
+    const response = await axios.post('http://localhost:8000/rebuild', formData);
     
     // 处理响应
     if (response.data) {
@@ -1265,7 +1273,6 @@ const loadKnowledgeGraph = async (file) => {
 
 // 添加历史上下文相关状态
 const enableHistoryContext = ref(true);
-const noteType = ref('general');
 
 const onUploadClick = () => {
   const formData = new FormData();
@@ -1285,6 +1292,49 @@ const onUploadClick = () => {
 
 // 修改onUploadSuccess函数，处理noteType参数
 // ... existing code ...
+
+// 修改onBeforeUpload函数，添加调试信息
+const onBeforeUpload = async (file) => {
+  try {
+    // 创建FormData对象
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('noteType', noteType.value);
+    
+    // 使用open/off字符串表示开关状态
+    const img2txtValue = useImg2txt.value ? 'open' : 'off';
+    formData.append('use_img2txt', img2txtValue);
+    
+    console.log('上传参数:', {
+      file: file.name,
+      noteType: noteType.value,
+      use_img2txt: img2txtValue
+    });
+
+    // 在上传前先检查文件是否已经存在，如果存在则执行更新操作
+    const existingFile = uploadFileList.value.find(item => item.name === file.name);
+    
+    // 开始上传过程
+    const response = await axios.post('http://localhost:8000/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: (progressEvent) => {
+        // 计算上传进度
+        const percentage = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        
+        // 更新上传进度
+        const uploadingFile = uploadFileList.value.find(item => item.name === file.name);
+        if (uploadingFile) {
+          uploadingFile.percentage = percentage;
+        }
+      }
+    });
+  } catch (error) {
+    console.error('上传文件失败:', error);
+    ElMessage.error('上传文件失败');
+  }
+}
 </script>
 
 <template>
@@ -1295,7 +1345,9 @@ const onUploadClick = () => {
         v-model:enableStreamOutput="enableStreamOutput"
         v-model:enableHistoryContext="enableHistoryContext"
         v-model:noteType="noteType"
+        v-model:useImg2txt="useImg2txt"
         @update:enableStreamOutput="saveStreamSetting"
+        @update:useImg2txt="saveImg2txtSetting"
         @closeAll="handleCloseAll"
     />
     <div class="main-content">
@@ -1474,11 +1526,14 @@ const onUploadClick = () => {
         <div v-if="activeView === 'upload'" class="upload-view">
           <div class="background"></div>
           <div class="upload">
-            <h1>知识图谱构建系统! 🎉</h1>
+            <h1>智能图谱笔记系统! 🎉</h1>
             <el-upload
                 drag
                 action="http://localhost:8000/upload"
-                :data="{noteType: noteType}"
+                :data="() => ({ 
+                  noteType: noteType, 
+                  use_img2txt: useImg2txt ? 'true' : 'false'
+                })"
                 multiple
                 :show-file-list="false"
                 :before-upload="beforeUpload"
@@ -1490,10 +1545,12 @@ const onUploadClick = () => {
               <div class="upload-text">
                 点击或拖拽上传文件
               </div>
-              <p>单个文件不超过 xxxM 或 xxx 页</p>
-              <p>单个图片不超过 xxM</p>
-              <p>单个上传最多 xx 个文件</p>
-              <el-button :icon="Link" size="large"> URL 上传</el-button>
+              <p>支持的文件类型：TXT，PDF...</p>
+              <p>单个txt不超过 5M</p>
+              <p>图谱初始构造时间较长，请耐心等待</p>
+              <br>
+              <br>
+              <p>作者：XIK</p>
             </el-upload>
           </div>
         </div>
@@ -2862,6 +2919,8 @@ const onUploadClick = () => {
 :deep(.el-popover.custom-popover) {
   padding: 0 0 12px 0;
   border-radius: 8px;
+  background-color: #fff;
+  border: none;
 
   [data-theme="dark"] & {
     background-color: #2b2b2b;

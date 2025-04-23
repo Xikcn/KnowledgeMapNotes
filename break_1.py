@@ -1,7 +1,7 @@
 import asyncio
 from openai import OpenAI
 from pydantic import BaseModel
-from fastapi import FastAPI, File, UploadFile, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -24,7 +24,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("app.log"),
+        logging.FileHandler("app.log", encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -73,6 +73,13 @@ chromadb_store = StoreTool(storage_path="./chroma_data", embedding_function=embe
 client = OpenAI(
     api_key=api_key,
     base_url="https://api.deepseek.com"
+)
+
+# 多模态模型
+vl_client = OpenAI(
+    # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx"
+    api_key='sk-xx',
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
 # 创建两个独立的agent
@@ -482,7 +489,7 @@ def process_knowledge_graph(base_name: str, text_content: str, original_filename
         raise
 
 
-def process_uploaded_file(original_path: str, filename: str, noteType: str = "general"):
+def process_uploaded_file(original_path: str, filename: str, noteType: str = "general", use_img2txt: bool = False):
     """后台处理任务（包含文件转换）"""
     try:
         # 获取文件信息
@@ -499,16 +506,28 @@ def process_uploaded_file(original_path: str, filename: str, noteType: str = "ge
         kg_manager.original_file_type = filename  # 使用完整文件名
 
         # 文件转换处理
-        if file_ext in FILE_PROCESSORS:
-            # 使用专用处理器转换
-            processor = FILE_PROCESSORS[file_ext](output_dir=TXT_FOLDER)
-            processor.process([original_path])
-            processor.save_as_txt(combine=False)
-        elif file_ext == '.txt':
-            # 直接复制文本文件
-            shutil.copy(original_path, txt_path)
-        else:
-            raise ValueError(f"不支持的文件类型: {file_ext}")
+        conversion_success = False
+        try:
+            if file_ext in FILE_PROCESSORS:
+                # 使用专用处理器转换
+                processor = FILE_PROCESSORS[file_ext](output_dir=TXT_FOLDER, vl_client=vl_client)
+                processor.process([original_path], use_img2txt)
+                processor.save_as_txt(combine=False, output_path=txt_filename)
+                conversion_success = True
+            elif file_ext == '.txt':
+                # 直接复制文本文件
+                shutil.copy(original_path, txt_path)
+                conversion_success = True
+            else:
+                raise ValueError(f"不支持的文件类型: {file_ext}")
+        except Exception as e:
+            logger.error(f"文件转换处理失败: {str(e)}")
+            raise ValueError(f"文件转换处理失败: {str(e)}")
+
+        # 确认文本文件是否存在
+        if not conversion_success or not os.path.exists(txt_path):
+            logger.error(f"文件转换失败，未生成文本文件: {txt_path}")
+            raise ValueError("文件转换失败，未能生成文本内容")
 
         # 读取转换后的文本内容
         with open(txt_path, "r", encoding="utf-8") as f:
@@ -530,7 +549,7 @@ def process_uploaded_file(original_path: str, filename: str, noteType: str = "ge
         logger.error(error_msg, exc_info=True)
 
 
-def process_update_file(original_path: str, filename: str, txt_path: str):
+def process_update_file(original_path: str, filename: str, txt_path: str, use_img2txt: bool = False):
     """处理文件增量更新"""
     try:
         # 获取文件信息
@@ -547,16 +566,28 @@ def process_update_file(original_path: str, filename: str, txt_path: str):
         kg_manager.original_file_type = filename  # 使用完整文件名
 
         # 文件转换处理
-        if file_ext in FILE_PROCESSORS:
-            # 使用专用处理器转换
-            processor = FILE_PROCESSORS[file_ext](output_dir=TXT_FOLDER)
-            processor.process([original_path])
-            processor.save_as_txt(combine=False, filename=new_txt_filename)
-        elif file_ext == '.txt':
-            # 直接复制文本文件
-            shutil.copy(original_path, new_txt_path)
-        else:
-            raise ValueError(f"不支持的文件类型: {file_ext}")
+        conversion_success = False
+        try:
+            if file_ext in FILE_PROCESSORS:
+                # 使用专用处理器转换
+                processor = FILE_PROCESSORS[file_ext](output_dir=TXT_FOLDER, vl_client=vl_client)
+                processor.process([original_path], use_img2txt)
+                processor.save_as_txt(combine=False, output_path=new_txt_filename)
+                conversion_success = True
+            elif file_ext == '.txt':
+                # 直接复制文本文件
+                shutil.copy(original_path, new_txt_path)
+                conversion_success = True
+            else:
+                raise ValueError(f"不支持的文件类型: {file_ext}")
+        except Exception as e:
+            logger.error(f"文件转换处理失败: {str(e)}")
+            raise ValueError(f"文件转换处理失败: {str(e)}")
+
+        # 确认临时文件是否存在
+        if not conversion_success or not os.path.exists(new_txt_path):
+            logger.error(f"文件转换失败，未生成临时文件: {new_txt_path}")
+            raise ValueError("文件转换失败，未能生成文本内容")
 
         # 读取新的文本内容
         with open(new_txt_path, "r", encoding="utf-8") as f:
@@ -566,9 +597,20 @@ def process_update_file(original_path: str, filename: str, txt_path: str):
         with open(txt_path, "r", encoding="utf-8") as f:
             original_text_content = f.read()
 
-        logger.info(f"文件 {filename} 转换完成，开始增量更新知识图谱")
+        logger.info(f"文件 {filename} 转换完成，开始比较内容差异")
 
-        # 加载原有知识图谱
+        # 检查文件内容是否完全相同
+        if new_text_content == original_text_content:
+            logger.info(f"文件内容完全相同，无需更新: {base_name}")
+
+            # 删除临时文件
+            os.remove(new_txt_path)
+
+            # 更新处理状态为已完成
+            PROCESS_STATUS[base_name] = "completed"
+            return
+
+        # 增量更新前，先加载原有知识图谱
         if not kg_manager.load_store(base_name):
             raise ValueError(f"无法加载原有知识图谱: {base_name}")
 
@@ -578,6 +620,18 @@ def process_update_file(original_path: str, filename: str, txt_path: str):
 
         # 执行增量更新
         new_kg_triplet = kg_manager.增量更新(new_text_content)
+
+        # 检查更新结果是否为空
+        if not new_kg_triplet or len(new_kg_triplet) == 0:
+            logger.info(f"无新增内容，知识图谱保持不变: {base_name}")
+
+            # 更新完成后，用新文件替换旧文件
+            shutil.copy(new_txt_path, txt_path)
+            os.remove(new_txt_path)  # 删除临时文件
+
+            # 更新处理状态为已完成
+            PROCESS_STATUS[base_name] = "completed"
+            return
 
         # 转换为有向图
         kg_manager.三元组转有向图nx(new_kg_triplet)
@@ -589,9 +643,19 @@ def process_update_file(original_path: str, filename: str, txt_path: str):
         shutil.copy(new_txt_path, txt_path)
         os.remove(new_txt_path)  # 删除临时文件
 
-        # 保存更新后的知识图谱
-        kg_manager.save_store()
-        logger.info(f"知识图谱增量更新完成，耗时: {time.time() - start_time:.2f}秒")
+        # 安全检查：确保Bolts不为空再保存
+        if hasattr(kg_manager, 'Bolts') and kg_manager.Bolts:
+            # 保存更新后的知识图谱
+            try:
+                kg_manager.save_store()
+                logger.info(f"知识图谱增量更新完成，耗时: {time.time() - start_time:.2f}秒")
+            except ValueError as ve:
+                if "输入必须是非空字符串列表" in str(ve):
+                    logger.warning(f"知识图谱增量更新过程中没有生成新的节点，跳过保存步骤")
+                else:
+                    raise
+        else:
+            logger.warning(f"知识图谱增量更新没有生成有效的节点，跳过保存步骤")
 
         # 保存并移动结果文件
         result_file = f"{base_name}.html"
@@ -610,15 +674,34 @@ def process_update_file(original_path: str, filename: str, txt_path: str):
             PROCESS_STATUS[base_name] = "error"
         logger.error(error_msg, exc_info=True)
 
+        # 清理临时文件
+        if 'new_txt_path' in locals() and os.path.exists(new_txt_path):
+            try:
+                os.remove(new_txt_path)
+            except:
+                pass
+
 
 @app.post("/upload")
 async def upload_file(
-        file: UploadFile = File(...),
-        noteType: str = "general",
-        background_tasks: BackgroundTasks = None
+    file: UploadFile = File(...),
+    noteType: str = Form("general"),
+    use_img2txt: str = Form("true"),
+    # 这里的大坑，必须用Form来接收而不是
+    #         noteType: str = "general",
+    #         use_img2txt: str = "true",
+
+    background_tasks: BackgroundTasks = None
 ):
     """支持多种格式的文件上传接口，支持增量更新"""
     try:
+        print(use_img2txt,11111111)
+        print(noteType,11111111)
+        # 将字符串类型的use_img2txt参数转换为布尔值
+        use_img2txt_bool = use_img2txt == "true"
+
+        logger.info(f"收到图片文本识别参数: {use_img2txt} -> {use_img2txt_bool}")
+
         # 保存原始文件
         filename = file.filename
         base_name = os.path.splitext(filename)[0]
@@ -648,13 +731,14 @@ async def upload_file(
             f.write(contents)
 
         logger.info(f"文件 {filename} 上传成功，存储为 {original_path}")
+        logger.info(f"使用图片文本识别参数: {use_img2txt} -> {use_img2txt_bool}")
 
         # 设置状态和后台处理任务
         if file_exists and existing_txt:
             # 文件在数据库中已存在，执行增量更新
             PROCESS_STATUS[base_name] = "updating"
             logger.info(f"文件 {filename} 已存在，将进行增量更新")
-            background_tasks.add_task(process_update_file, original_path, filename, txt_path)
+            background_tasks.add_task(process_update_file, original_path, filename, txt_path, use_img2txt_bool)
 
             return JSONResponse({
                 "status": "updating",
@@ -665,7 +749,7 @@ async def upload_file(
         else:
             # 新文件上传，执行常规处理
             PROCESS_STATUS[base_name] = "uploading"
-            background_tasks.add_task(process_uploaded_file, original_path, filename, noteType)
+            background_tasks.add_task(process_uploaded_file, original_path, filename, noteType, use_img2txt_bool)
 
             return JSONResponse({
                 "status": "uploading",
@@ -745,7 +829,6 @@ async def get_result(filename: str):
     """获取处理结果的HTML文件"""
 
     base_name = os.path.splitext(filename)[0]
-    print(base_name)
     result_file = f"{base_name}.html"
     result_path = os.path.join(RESULT_FOLDER, result_file)
 
@@ -884,7 +967,10 @@ async def get_file_entities(filename: str, count: int = 5):
         manager = storeManager(store=chromadb_store, agent=kg_agent)
 
         # 获取文件中的主要实体
-        entities = manager.get_n_entity(base_name, count)
+        # 按关联度最高的节点
+        entities = manager.edge_max_node(base_name, count)
+        # 随机节点
+        # entities = manager.get_n_entity(base_name, count)
 
         if entities is None:
             return JSONResponse(

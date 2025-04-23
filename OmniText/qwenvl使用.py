@@ -14,7 +14,7 @@ base64_image = encode_image(r"D:\Python_workspace\AI_NOTE\xxx\xxx.png")
 
 client = OpenAI(
     # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx"
-    api_key='xx',
+    api_key='sk-xx',
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 completion = client.chat.completions.create(

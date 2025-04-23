@@ -19,7 +19,6 @@ class  storeManager:
                 return None
 
             current_G = state['current_G']
-            print(type(current_G))
             return current_G
         except Exception as e:
             print(f"加载知识图谱出错: {file}, 错误: {str(e)}")
@@ -43,17 +42,23 @@ class  storeManager:
             print(f"加载知识图谱出错: {file}, 错误: {str(e)}")
             return None
 
+    def edge_max_node(self,file,n):
+        current_g = self.get_G(file)
+        degrees = current_g.degree()
+        sorted_degrees = sorted(degrees, key=lambda x: x[1], reverse=True)
+        return sorted_degrees[:n]
+
 
 
     def text2entity(self, query: str, file: str):
-        current_G = self.get_G(file)
+        current_g = self.get_G(file)
         # 添加对current_G为None的检查
-        if current_G is None:
+        if current_g is None:
             print(f"无法获取知识图谱数据: {file}")
             return []
 
         prompt = open("./prompt/v2/entity_q2merge.txt", encoding='utf-8').read()
-        entity = [str(i) for i in current_G]
+        entity = [str(i) for i in current_g]
         input_parameter = f"实体列表：{entity}\n问题：{query}"
         output = self.agent.ollama_safe_generate_response(prompt, input_parameter)
         return output['entities']
