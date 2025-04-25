@@ -3,21 +3,179 @@
 ## 项目展示
 https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 
+## 项目简介
+这是一个基于知识图谱的笔记系统，通过将PDF文档转换为知识图谱，实现高效的知识管理和检索。系统支持PDF文档处理、实体关系提取、知识图谱构建与可视化，并提供基于RAG和知识图谱的智能问答功能。
+
+## 主要功能
+- PDF文档处理与转换
+- 知识图谱自动构建
+- 文档智能问答
+- 知识实体关系可视化
+- 增量更新知识库
+
 ## 待完成的功能
-问题生成
-前端加入增量更新与差于对比
+- 问题生成
+- 前端加入增量更新与差异对比
 
-
-
-### 技术栈
-#### 后端功能实现
+## 技术栈
+### 后端功能实现
 1. pdf转txt（提取pdf的表格，获取图片信息）
-2. 向量数据库
+2. 向量数据库（ChromaDB）
 3. 提示词工程
-4. rag，hybridrag
+4. RAG，HybridRAG
 5. 知识图谱构建（kg-gen）
 6. 图的社区查询
 7. 消息队列（采用简单方式，不采用redis方便单机部署）
 8. 增量更新（增加新增块的实体与关系，删除消失块相关实体与关系）
-9. fastapi
+9. FastAPI
+
+### 前端技术栈
+1. Vue 3
+2. Element Plus
+3. ECharts
+4. Axios
+5. Vite
+
+## 系统架构
+- 文档处理模块：负责PDF文档的解析和文本提取
+- 知识图谱模块：实现实体识别、关系抽取和知识图谱构建
+- 检索模块：基于向量数据库的语义检索
+- API服务：FastAPI实现的RESTful接口
+- 前端应用：Vue3实现的用户界面
+
+## 详细使用说明
+### 文档上传与处理
+1. 访问系统首页，点击"上传文档"按钮
+2. 选择要上传的PDF文件，点击确认
+3. 系统会自动处理文档并构建知识图谱
+4. 处理完成后，可以在文档列表中查看已上传的文件
+
+### 知识图谱查询
+1. 在文档列表中选择要查询的文档
+2. 点击"查看知识图谱"按钮
+3. 系统会显示文档的知识图谱可视化结果
+4. 可以通过点击节点查看详细信息，或者使用搜索功能定位特定实体
+
+### 智能问答
+1. 在文档列表中选择要问答的文档
+2. 点击"开始问答"按钮
+3. 在输入框中输入问题
+4. 系统会基于文档内容和知识图谱提供回答
+
+## 安装与使用
+### 环境要求
+- Python 3.8+
+- Node.js 16+
+- CUDA支持（推荐）
+
+### 后端安装
+```bash
+# 安装依赖
+pip install -r requirements.txt
+# 启动服务
+python app.py
+```
+
+### 前端安装
+```bash
+# 进入前端目录
+cd projects/vue
+# 安装依赖
+npm install
+# 启动开发服务器
+npm run dev
+```
+
+### 完整部署流程
+1. 克隆仓库
+```bash
+git clone https://github.com/yourusername/knowledge-map-notes.git
+cd knowledge-map-notes
+```
+
+2. 安装后端依赖
+```bash
+pip install -r requirements.txt
+```
+
+3. 安装前端依赖
+```bash
+cd projects/vue
+npm install
+```
+
+4. 构建前端（生产环境）
+```bash
+npm run build
+```
+
+5. 启动后端服务
+```bash
+cd ../..
+python app.py
+```
+
+6. 访问系统
+浏览器中打开 http://localhost:8000
+
+## 开发指南
+### 后端开发
+1. 使用Python虚拟环境
+```bash
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate  # Windows
+```
+
+2. 安装开发依赖
+```bash
+pip install -r requirements-dev.txt
+```
+
+3. 运行测试
+```bash
+pytest
+```
+
+### 前端开发
+1. 启动开发服务器
+```bash
+cd projects/vue
+npm run dev
+```
+
+2. 代码规范检查
+```bash
+npm run lint
+```
+
+## 目录结构
+- `app.py`: 主应用入口
+- `OmniText/`: 文本处理模块
+- `KnowledgeGraphManager/`: 知识图谱管理模块
+- `LLM/`: 大语言模型交互
+- `TextSlicer/`: 文本分割工具
+- `embedding_tools/`: 向量嵌入工具
+- `projects/vue/`: 前端Vue项目
+- `prompt/`: 提示词模板
+- `chroma_data/`: 向量数据库存储
+- `uploads/`: 上传文件存储
+- `txt_files/`: 处理后文本存储
+- `results/`: 结果输出目录
+- `docs/`: 文档说明
+- `lib/`: 通用库函数
+- `output/`: 临时输出文件
+- `images/`: 图片资源
+
+
+## 常见问题
+### Q: 系统支持哪些类型的PDF文件？
+A: 系统支持大多数标准PDF文件，包括文本PDF和扫描PDF（需OCR）。
+
+### Q: 如何更新知识图谱？
+A: 重新上传文档或使用增量更新功能可更新知识图谱。
+
+
+## 许可证
+MIT
 
