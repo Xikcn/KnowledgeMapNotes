@@ -1802,6 +1802,7 @@ const onBeforeUpload = async (file) => {
         padding: 12px 16px;
         margin: 0;
         border-bottom: 1px solid var(--el-border-color-lighter);
+        user-select: none; /* 禁止文本选择 */
 
         .drawer-manu-header {
           color: var(--el-text-color-primary);
@@ -1842,6 +1843,7 @@ const onBeforeUpload = async (file) => {
           align-items: center;
           justify-content: space-between;
           margin: 12px 16px;
+          user-select: none; /* 禁止文本选择 */
 
           .filter {
             line-height: 1.5;
@@ -1903,6 +1905,7 @@ const onBeforeUpload = async (file) => {
           flex: 1;
           padding: 0 16px;
           overflow-y: auto;
+          user-select: none; /* 禁止文本选择 */
 
           .file-item {
             display: flex;
@@ -1988,6 +1991,7 @@ const onBeforeUpload = async (file) => {
                 align-items: center;
                 flex: 1;
                 min-width: 0; // 防止子元素溢出
+                user-select: none; /* 禁止文本选择 */
 
                 .file-icon {
                   margin-right: 12px;
@@ -2011,7 +2015,8 @@ const onBeforeUpload = async (file) => {
                 .file-name-container {
                   flex: 1;
                   min-width: 0; // 防止子元素溢出
-
+                  user-select: none; /* 禁止文本选择 */
+                  
                   .file-name {
                     white-space: nowrap;
                     overflow: hidden;
@@ -2020,6 +2025,7 @@ const onBeforeUpload = async (file) => {
                     color: var(--el-text-color-primary);
                     font-weight: 500;
                     max-width: 100%;
+                    user-select: none; /* 禁止文本选择 */
                   }
 
                   .file-progress {
@@ -2032,7 +2038,8 @@ const onBeforeUpload = async (file) => {
                 font-size: 12px;
                 white-space: nowrap;
                 flex-shrink: 0;
-
+                user-select: none; /* 禁止文本选择 */
+                
                 &.uploading, &.processing {
                   color: var(--el-color-primary);
                 }
@@ -2051,6 +2058,7 @@ const onBeforeUpload = async (file) => {
               padding: 12px 16px;
               border-top: 1px dashed var(--el-border-color-light);
               background-color: var(--el-bg-color-page);
+              user-select: none; /* 禁止文本选择 */
               overflow: hidden;
               transition: max-height 0.3s ease-in-out;
               
@@ -2076,16 +2084,19 @@ const onBeforeUpload = async (file) => {
                 font-weight: 600;
                 margin-bottom: 8px;
                 color: var(--el-text-color-primary);
+                user-select: none; /* 禁止文本选择 */
               }
               
               .entities-content {
                 display: flex;
                 flex-wrap: wrap;
                 gap: 8px;
+                user-select: none; /* 禁止文本选择 */
                 
                 .entity-tag {
                   margin-right: 0;
                   cursor: default;
+                  user-select: none; /* 禁止文本选择 */
                 }
               }
               
@@ -2219,6 +2230,7 @@ const onBeforeUpload = async (file) => {
           height: 48px;
           border-bottom: 1px solid var(--el-border-color-light);
           background-color: var(--el-bg-color-page);
+          user-select: none; /* 禁止文本选择 */
 
           .file-info {
             min-width: 100px;
@@ -3124,4 +3136,19 @@ const onBeforeUpload = async (file) => {
   overflow-y: auto;
   scroll-behavior: smooth;
 }
+
+/* 确保原文件和聊天内容可以选择文本 */
+.panel-content {
+  user-select: text !important; /* 允许文本选择 */
+}
+
+.rag-chat-container {
+  user-select: text !important; /* 允许文本选择 */
+}
+
+.original-panel, .chat-panel {
+  user-select: text !important; /* 允许文本选择 */
+}
+
+// ... existing code ...
 </style>
