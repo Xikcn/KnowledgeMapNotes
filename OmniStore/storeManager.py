@@ -70,6 +70,7 @@ class  storeManager:
                 file=file,
                 n_results=n_results
             )
+            # print(results)
             return results.get("documents", [])
         except Exception as e:
             print(f"选择向量失败: {file}, 错误: {str(e)}")

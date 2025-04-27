@@ -10,7 +10,6 @@ import shutil
 import logging
 from typing import Dict, List, Optional, AsyncGenerator, Any
 from urllib.parse import quote
-
 from OmniStore.storeManager import storeManager
 from OmniText.PDFProcessor import PDFProcessor
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +34,6 @@ class rag_item(BaseModel):
     request: str
     model: str
     flow: bool = False
-    kg_id: Optional[str] = None
     top_k: int = 1
     filename: Optional[str] = None
     messages: Optional[List[Dict[str, str]]] = None  # 确保消息格式正确
@@ -78,7 +76,7 @@ client = OpenAI(
 # 多模态模型
 vl_client = OpenAI(
     # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx"
-    api_key='sk-aac9a07d3c13455bb0202bc75e3c9b29',
+    api_key='sk-xx',
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
@@ -107,6 +105,8 @@ app.add_middleware(
 
 # 添加线程池
 executor = ThreadPoolExecutor(max_workers=16)  # 增加线程池大小以处理更多并发请求
+# 添加专用于RAG的线程池
+rag_executor = ThreadPoolExecutor(max_workers=16)  # RAG专用线程池
 # 添加文件处理锁
 file_locks = {}
 # 添加RAG问答锁
@@ -216,8 +216,8 @@ async def hybridrag_stream(item: rag_item):
                         # 为每次查询创建新的storeManager实例
                         store_manager = storeManager(store=chromadb_store, agent=kg_agent)
 
-                        # 执行RAG流程 - 实体识别
-                        rag_entity = await loop.run_in_executor(executor, store_manager.text2entity, item.request,
+                        # 执行RAG流程 - 实体识别，使用RAG专用线程池
+                        rag_entity = await loop.run_in_executor(rag_executor, store_manager.text2entity, item.request,
                                                                 base_name)
                         if not rag_entity:  # 如果返回空列表
                             logger.warning(f"未能识别实体: {item.filename}")
@@ -225,8 +225,8 @@ async def hybridrag_stream(item: rag_item):
                         yield "data: " + json.dumps(
                             {"type": "status", "content": "实体识别完成", "request_id": request_id}) + "\n\n"
 
-                        # 执行RAG流程 - 社区检测
-                        community_info = await loop.run_in_executor(executor, store_manager.community_louvain_G,
+                        # 执行RAG流程 - 社区检测，使用RAG专用线程池
+                        community_info = await loop.run_in_executor(rag_executor, store_manager.community_louvain_G,
                                                                     base_name, rag_entity)
                         if not community_info:  # 如果返回空列表
                             logger.warning(f"未能进行社区检测: {item.filename}")
@@ -234,8 +234,8 @@ async def hybridrag_stream(item: rag_item):
                         yield "data: " + json.dumps(
                             {"type": "status", "content": "社区检测完成", "request_id": request_id}) + "\n\n"
 
-                        # 执行RAG流程 - 向量选择
-                        results = await loop.run_in_executor(executor, store_manager.select_vectors, item.request,
+                        # 执行RAG流程 - 向量选择，使用RAG专用线程池
+                        results = await loop.run_in_executor(rag_executor, store_manager.select_vectors, item.request,
                                                              base_name,
                                                              item.top_k)
                         if not results:  # 如果返回空列表
@@ -247,10 +247,10 @@ async def hybridrag_stream(item: rag_item):
                         # 准备流式输出
                         logger.info(f"使用流式输出模式: {item.request}")
 
-                        # 创建响应流 - 使用hybrid_rag_stream函数
+                        # 创建响应流 - 使用hybrid_rag_stream函数，使用RAG专用线程池
                         try:
                             response_stream = await loop.run_in_executor(
-                                executor,
+                                rag_executor,
                                 rag_agent.hybrid_rag_stream,
                                 item.request,
                                 community_info,
@@ -278,10 +278,8 @@ async def hybridrag_stream(item: rag_item):
                                         "full": full_text,
                                         "request_id": request_id
                                     }) + "\n\n"
-
                             # 处理最终结果
                             answer, material = rag_agent.extract_material_from_text(full_text)
-
                             # 发送最终结果
                             yield "data: " + json.dumps({
                                 "type": "final",
@@ -357,19 +355,19 @@ async def process_session_queue(session_id: str):
                     # 为每次查询创建新的storeManager实例
                     store_manager = storeManager(store=chromadb_store, agent=kg_agent)
 
-                    # 执行RAG流程
+                    # 执行RAG流程，使用RAG专用线程池
                     flow = item.flow
-                    rag_entity = await loop.run_in_executor(executor, store_manager.text2entity, item.request,
+                    rag_entity = await loop.run_in_executor(rag_executor, store_manager.text2entity, item.request,
                                                             base_name)
-                    community_info = await loop.run_in_executor(executor, store_manager.community_louvain_G,
+                    community_info = await loop.run_in_executor(rag_executor, store_manager.community_louvain_G,
                                                                 base_name, rag_entity)
-                    results = await loop.run_in_executor(executor, store_manager.select_vectors, item.request,
+                    results = await loop.run_in_executor(rag_executor, store_manager.select_vectors, item.request,
                                                          base_name, item.top_k)
 
                     try:
-                        # 使用hybrid_rag函数
+                        # 使用hybrid_rag函数，使用RAG专用线程池
                         result = await loop.run_in_executor(
-                            executor,
+                            rag_executor,
                             rag_agent.hybrid_rag,
                             item.request,
                             community_info,
@@ -695,8 +693,8 @@ async def upload_file(
 ):
     """支持多种格式的文件上传接口，支持增量更新"""
     try:
-        print(use_img2txt,11111111)
-        print(noteType,11111111)
+        # print(use_img2txt,11111111)
+        # print(noteType,11111111)
         # 将字符串类型的use_img2txt参数转换为布尔值
         use_img2txt_bool = use_img2txt == "true"
 

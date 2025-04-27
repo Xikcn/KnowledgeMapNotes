@@ -2,9 +2,13 @@ import json
 from collections import defaultdict
 import networkx as nx
 import chromadb
+import torch
 from chromadb.utils import embedding_functions
 import time
+from embedding_tools.embedding_tools import BgeZhEmbeddingFunction
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class StoreTool:
     def __init__(self, storage_path="./chroma_data", embedding_function=None):
@@ -15,12 +19,20 @@ class StoreTool:
             # 使用默认的embedding函数（实际使用中可以替换）
             self.embedding_func = embedding_functions.DefaultEmbeddingFunction()
         else:
-            from embedding_tools.embedding_tools import BgeZhEmbeddingFunction
             embedder = BgeZhEmbeddingFunction(
                 model_path=r"D:\Models_Home\Huggingface\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6",
                 device="cuda"  # 可选，强制使用GPU
             )
             self.embedding_func = embedder
+
+
+        model_name = "BAAI/bge-reranker-base"
+        rerank_model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        rerank_model.to(device)
+        rerank_model.eval()
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.rerank_model = rerank_model
+
 
         # 获取或创建集合
         self.collection = self.client.get_or_create_collection(
@@ -119,8 +131,29 @@ class StoreTool:
         """获取所有存储的文件信息"""
         return self.collection.get()
 
+    # rerank 重拍 向量检索结果
+    def rerank_with_bge(self,query: str, documents: list, ids: list,metadata:list, top_k: int = 3):
+        if not documents:
+            return []
+
+        # 准备query-doc对
+        pairs = [[query, doc] for doc in documents]
+
+        # 使用bge-reranker计算分数
+        with torch.no_grad():
+            inputs = self.tokenizer(pairs, padding=True, truncation=True, return_tensors='pt', max_length=512)
+            inputs = inputs.to(device)
+            scores = self.rerank_model(**inputs, return_dict=True).logits.view(-1).float().tolist()
+
+        # 将分数与文档组合并排序
+        reranked_results = list(zip(documents, ids, metadata,scores))
+        reranked_results.sort(key=lambda x: x[2], reverse=True)
+
+        return reranked_results[:top_k]
+
     # 查询向量
-    def select_vectors(self, query: str, file: str, n_results: int = 5):
+    def select_vectors(self, query: str, file: str, n_results: int = 3):
+
         """查询指定文件中最相似的文本块
 
         Args:
@@ -146,14 +179,38 @@ class StoreTool:
             n_results=n_results,
             include=["documents", "metadatas", "distances"]
         )
+        # 是否对检索文本进行重排
+        rerank = True
+        if rerank:
+            retrieved_docs = results['documents'][0]
+            retrieved_ids = results['ids'][0]
+            retrieved_distances = results['distances'][0]
+            rerank_list =  self.rerank_with_bge(query, retrieved_docs, retrieved_ids, retrieved_distances,n_results)
+            ids = []
+            documents = []
+            distances = []
+            metadatas = []
+            # list(zip(documents, ids, metadata,scores))
+            for i in rerank_list:
+                ids.append(i[1])
+                documents.append(i[0])
+                metadatas.append(i[2])
+                distances.append(i[3])
+            return {
+                "ids": ids,  # 第一层列表对应不同query
+                "documents": documents,
+                "metadatas": metadatas,
+                "distances": distances
+            }
 
-        # 标准化返回结构（处理ChromaDB返回的嵌套列表）
-        return {
-            "ids": results["ids"][0],  # 第一层列表对应不同query
-            "documents": results["documents"][0],
-            "metadatas": results["metadatas"][0],
-            "distances": results["distances"][0]
-        }
+        else:
+            # 标准化返回结构（处理ChromaDB返回的嵌套列表）
+            return {
+                "ids": results["ids"][0],  # 第一层列表对应不同query
+                "documents": results["documents"][0],
+                "metadatas": results["metadatas"][0],
+                "distances": results["distances"][0]
+            }
 
     def save_rag_history(self, filename, messages):
         """保存RAG对话历史到数据库

@@ -213,6 +213,17 @@ const deleteFile = async (file) => {
       uploadFileList.value.splice(index, 1);
     }
     
+    // 如果删除的是当前查看的文件，先清空当前状态再清理缓存
+    if (currentFile.value && currentFile.value.name === file.name) {
+      // 先清空当前文件状态
+      currentChatFile.value = null;
+      currentFile.value = null;
+      chatMessages.value = [];
+      // 然后关闭结果视图
+      activeView.value = 'upload';
+      knowledgeGraphData.value = null;
+    }
+
     // 清理本地缓存
     localStorage.removeItem(`kg_${file.name}`);  // 删除知识图谱数据
     localStorage.removeItem(`chat_${file.name}`);  // 删除聊天记录
@@ -220,11 +231,6 @@ const deleteFile = async (file) => {
     // 清理聊天状态
     if (fileChatStates.value[file.name]) {
       delete fileChatStates.value[file.name];
-    }
-
-    // 如果删除的是当前查看的文件，关闭结果视图
-    if (currentFile.value && currentFile.value.name === file.name) {
-      closeResultView();
     }
 
     ElMessage.success(`文件 ${file.name} 已删除`);
