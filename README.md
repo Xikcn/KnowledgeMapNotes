@@ -63,6 +63,32 @@ https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 - Python 3.8+
 - Node.js 16+
 - CUDA支持（推荐）
+- torch( 可选，不用删除代码中的相关部分即可，不影响使用，主要是to() )
+
+## API服务申请
+### 获取视觉模型（如果不开启可以不用）
+https://bailian.console.aliyun.com/?spm=5176.29597918.J_SEsSjsNv72yRuRFS2VknO.6.7b3d7ca06Twk2g&tab=api#/api
+```pycon
+vl_client = OpenAI(
+    # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx"
+    api_key='sk-xx',
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+)
+```
+
+### 嵌入模型的使用
+建议下载到本地离线处理（Huggingface）也可以使用网络库，会自动下载到本地，第二次换成本地可以快速启动
+如果无法下载建议，去Huggingface官网下载到本地，直接使用本地模型
+bge-base-zh
+```python
+from sentence_transformers import SentenceTransformer
+# 初始化模型和组件
+# embeddings = SentenceTransformer('BAAI/bge-base-zh').to(device)
+embeddings = SentenceTransformer(
+    r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6"
+    )
+```
+
 
 ### 后端安装
 ```bash
@@ -114,36 +140,6 @@ python app.py
 6. 访问系统
 浏览器中打开 http://localhost:8000
 
-## 开发指南
-### 后端开发
-1. 使用Python虚拟环境
-```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate  # Windows
-```
-
-2. 安装开发依赖
-```bash
-pip install -r requirements-dev.txt
-```
-
-3. 运行测试
-```bash
-pytest
-```
-
-### 前端开发
-1. 启动开发服务器
-```bash
-cd projects/vue
-npm run dev
-```
-
-2. 代码规范检查
-```bash
-npm run lint
-```
 
 ## 目录结构
 - `app.py`: 主应用入口
@@ -178,6 +174,12 @@ A: 重新上传文档或使用增量更新功能可更新知识图谱。
 - 文本分块进行rag的部分有问题（有些文本丢失）
 - 生成试卷进行学生的复习（允许联网生成易错选项）
 - 对上传的笔记可以进行检查功能，如有存在公理上的错误则提示用户进行修改
+- 增量更新没删除需要删除的块只新增块了（解决bid生成的问题）
+- 携带聊天内容会对增量更新后问答具有一部分记忆（无伤大雅，关闭携带历史记录即可，或者清理聊天记录）
+
+## 可替换的技术栈
+* mineru 用于pdf转markdown，替换多模态2txt功能
+* 
 
 ## 许可证
 MIT

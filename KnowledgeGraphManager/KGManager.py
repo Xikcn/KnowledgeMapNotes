@@ -224,10 +224,19 @@ class KgManager:
             bids_to_remove.append(bid)
 
         filtered_data = [item for item in self.kg_triplet if item['bid'] not in bids_to_remove]
+
+        self.store.vector_collection.delete(
+            where={"file": self.file},
+            ids=bids_to_remove
+        )
+
         add_data = []
+
+
         # 新增的块
         for bid, text in added_blocks:
             add_data.append((bid, text))
+
         self.kg_triplet = self.知识图谱的构建(add_data)
         new_kg_triplet = self.kg_triplet + filtered_data
 

@@ -32,7 +32,6 @@ class DeepSeekAgent:
         return -1
 
     def ollama_request(self, prompt, input_parameter):
-        print("构建知识图谱",prompt,input_parameter)
         self.temp_sleep()
         response = self.client.chat.completions.create(
             model="deepseek-chat",
@@ -122,7 +121,6 @@ class DeepSeekAgent:
         return -1
 
     def ollama_request_rag_stream(self, prompt, input_parameter, messages):
-        print("进行rag")
         """流式请求方法"""
         # 确保消息格式正确
         formatted_messages = [{"role": "system", "content": prompt}]

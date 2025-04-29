@@ -57,10 +57,15 @@ from LLM.Deepseek_agent import DeepSeekAgent
 from sentence_transformers import SentenceTransformer
 from KnowledgeGraphManager.KGManager import KgManager
 from TextSlicer.SimpleTextSplitter import SemanticTextSplitter
+import torch
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # 初始化模型和组件
-embeddings = SentenceTransformer('BAAI/bge-base-zh')
-# embeddings = SentenceTransformer("D:\Models_Home\Huggingface\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6")
+# embeddings = SentenceTransformer('BAAI/bge-base-zh').to(device)
+
+embeddings = SentenceTransformer(
+    r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6"
+    ).to(device)
 
 api_key = "sk-xx"
 
@@ -692,8 +697,6 @@ async def upload_file(
 ):
     """支持多种格式的文件上传接口，支持增量更新"""
     try:
-        # print(use_img2txt,11111111)
-        # print(noteType,11111111)
         # 将字符串类型的use_img2txt参数转换为布尔值
         use_img2txt_bool = use_img2txt == "true"
 
