@@ -1,0 +1,16 @@
+uvicorn
+openai
+pydantic
+fastapi
+sentence-transformers
+chromadb
+numpy
+transformers
+camelot-py
+fitz
+tqdm
+python-louvain
+networkx
+tiktoken
+spacy
+pyvis

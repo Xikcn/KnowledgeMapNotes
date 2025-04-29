@@ -59,9 +59,8 @@ from KnowledgeGraphManager.KGManager import KgManager
 from TextSlicer.SimpleTextSplitter import SemanticTextSplitter
 
 # 初始化模型和组件
-embeddings = SentenceTransformer(
-    r'D:\Models_Home\Huggingface\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6'
-).to("cuda:0")
+embeddings = SentenceTransformer('BAAI/bge-base-zh')
+# embeddings = SentenceTransformer("D:\Models_Home\Huggingface\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6")
 
 api_key = "sk-xx"
 

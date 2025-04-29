@@ -98,17 +98,3 @@ class BgeZhEmbeddingFunction(EmbeddingFunction):
             raise RuntimeError("嵌入生成失败") from e
 
 
-# 使用示例
-if __name__ == "__main__":
-    # 初始化（只需一次）
-    embedder = BgeZhEmbeddingFunction(
-        model_path=r"D:\Models_Home\Huggingface\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6",
-        device="cuda"  # 可选，强制使用GPU
-    )
-
-    # 生成嵌入
-    texts = ["自然语言处理", "计算机视觉"]
-    embeddings = embedder(texts)
-
-    print(f"嵌入维度: {len(embeddings[0])}")
-    print(f"样例嵌入: {embeddings[0][:5]}...")

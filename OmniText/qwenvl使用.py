@@ -10,7 +10,7 @@ def encode_image(image_path):
 
 
 # 将xxxx/test.png替换为你本地图像的绝对路径
-base64_image = encode_image(r"D:\Python_workspace\AI_NOTE\xxx\xxx.png")
+base64_image = encode_image(r"./xxx/xxx.png")
 
 client = OpenAI(
     # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx"
