@@ -67,7 +67,7 @@ https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 
 ## API服务申请
 ### 获取视觉模型（如果不开启可以不用）
-https://bailian.console.aliyun.com/?spm=5176.29597918.J_SEsSjsNv72yRuRFS2VknO.6.7b3d7ca06Twk2g&tab=api#/api
+https://bailian.console.aliyun.com/?tab=api#/api
 ```pycon
 vl_client = OpenAI(
     # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx"
@@ -79,7 +79,13 @@ vl_client = OpenAI(
 ### 嵌入模型的使用
 建议下载到本地离线处理（Huggingface）也可以使用网络库，会自动下载到本地，第二次换成本地可以快速启动
 如果无法下载建议，去Huggingface官网下载到本地，直接使用本地模型
-bge-base-zh
+* 添加镜像
+```python
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+```
+
+* bge-base-zh本地模型使用
 ```python
 from sentence_transformers import SentenceTransformer
 # 初始化模型和组件
@@ -94,6 +100,8 @@ embeddings = SentenceTransformer(
 ```bash
 # 安装依赖
 pip install -r requirements.txt
+# uv安装依赖
+# uv pip install -r requirements.txt
 # 启动服务
 python app.py
 ```

@@ -61,11 +61,11 @@ import torch
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # 初始化模型和组件
-# embeddings = SentenceTransformer('BAAI/bge-base-zh').to(device)
+embeddings = SentenceTransformer('BAAI/bge-base-zh').to(device)
 
-embeddings = SentenceTransformer(
-    r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6"
-    ).to(device)
+# embeddings = SentenceTransformer(
+#     r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6"
+#     ).to(device)
 
 api_key = "sk-xx"
 

@@ -243,7 +243,7 @@ const deleteFile = async (file) => {
 };
 
 // 删除RAG历史记录功能
-const deleteRagHistory = async (file, event) => {
+const deleteRagHistory = async (event, file) => {
   // 阻止事件冒泡，防止触发文件查看
   event.stopPropagation();
   
@@ -731,6 +731,23 @@ const onUploadSuccess = (response, file) => {
       targetFile.display_status = '增量更新中';
       targetFile.percentage = 100;
       targetFile.resultId = response.resultId || Date.now();
+
+      // 删除浏览器缓存中的图片
+      localStorage.removeItem(`kg_${file.name}`);  // 删除知识图谱数据
+      localStorage.removeItem(`chat_${file.name}`);  // 删除聊天记录
+
+      // 清理聊天状态
+      if (fileChatStates.value[file.name]) {
+        delete fileChatStates.value[file.name];
+      }
+
+      // 如果当前正在查看该文件，清空当前状态
+      if (currentFile.value && currentFile.value.name === file.name) {
+        currentChatFile.value = null;
+        currentFile.value = null;
+        chatMessages.value = [];
+        knowledgeGraphData.value = null;
+      }
     } else {
       // 新文件，修改状态为处理中
       targetFile.status = 'processing';
@@ -1470,7 +1487,7 @@ const onBeforeUpload = async (file) => {
                               src="@/assets/icons/svg/clear.svg"
                               alt="清除RAG历史"
                               class="clear-icon"
-                              @click.stop="deleteRagHistory(file, $event)"
+                              @click.stop="deleteRagHistory($event, file)"
                           />
                         </el-tooltip>
                         <el-tooltip content="删除文件" placement="top">
