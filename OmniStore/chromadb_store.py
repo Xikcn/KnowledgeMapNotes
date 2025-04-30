@@ -19,11 +19,11 @@ class StoreTool:
             # 使用默认的embedding函数（实际使用中可以替换）
             self.embedding_func = embedding_functions.DefaultEmbeddingFunction()
         else:
-            embedder = BgeZhEmbeddingFunction(
-                model_path=r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6",
-                device=device
-            )
-            # embedder = BgeZhEmbeddingFunction(model_path=r"BAAI/bge-base-zh",device=device)
+            # embedder = BgeZhEmbeddingFunction(
+            #     model_path=r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6",
+            #     device=device
+            # )
+            embedder = BgeZhEmbeddingFunction(model_path=r"BAAI/bge-base-zh",device=device)
             self.embedding_func = embedder
 
 
