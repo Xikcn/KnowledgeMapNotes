@@ -216,5 +216,3 @@ class OllamaAgent:
             answer = text[:material_match.start()].strip()
             return answer, material
         return text, ""
-
-

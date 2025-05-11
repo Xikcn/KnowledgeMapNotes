@@ -99,12 +99,70 @@ class KgManager:
 
 
     def 知识融合(self,relations):
-        pass
-        relations_tuning = relations
-
-
-
-        return relations_tuning
+        # 创建一个字典来存储实体对及其关系
+        entity_pairs = defaultdict(list)
+        
+        # 收集所有具有相同实体的关系
+        for relation in relations:
+            for rel in relation['relation']:
+                source = rel['source']
+                target = rel['target']
+                # 使用排序后的实体对作为键，确保(source,target)和(target,source)被视为相同
+                entity_pair = tuple(sorted([source, target]))
+                entity_pairs[entity_pair].append({
+                    'bid': relation['bid'],
+                    'relation': rel
+                })
+        
+        # 处理需要融合的关系
+        merged_relations = []
+        for entity_pair, rel_list in entity_pairs.items():
+            if len(rel_list) > 1:  # 只处理有多个关系的实体对
+                print(entity_pair,"需要更新的",rel_list)
+                # 构建输入文本
+                input_text = f"实体1：{entity_pair[0]}\n实体2：{entity_pair[1]}\n"
+                input_text += "现有关系：\n"
+                for rel in rel_list:
+                    input_text += f"- {rel['relation']['relation']}（上下文：{rel['relation']['context']}）\n"
+                
+                # 读取提示词模板
+                prompt = open("./prompt/v2/knowledge_fusion.txt", encoding='utf-8').read()
+                prompt = prompt.replace("{input_text}", input_text)
+                print(input_text,"input_text")
+                # 使用Agent进行关系融合
+                merged_result = self.Agent.agent_safe_generate_response(prompt, input_text)
+                print(merged_result, "merged_result")
+                
+                # 将融合后的关系添加到结果中
+                for rel in rel_list:
+                    merged_relations.append({
+                        'bid': rel['bid'],
+                        'relation': merged_result['relations']  # 使用完整的融合后关系列表
+                    })
+            else:
+                # 对于只有一个关系的实体对，直接保留原关系
+                merged_relations.append({
+                    'bid': rel_list[0]['bid'],
+                    'relation': [rel_list[0]['relation']]  # 保持列表格式一致
+                })
+        
+        # 确保返回的关系格式正确
+        formatted_relations = []
+        for relation in merged_relations:
+            formatted_relation = {
+                'bid': relation['bid'],
+                'relation': []
+            }
+            for rel in relation['relation']:
+                if isinstance(rel, dict) and all(k in rel for k in ['source', 'target', 'relation', 'context']):
+                    formatted_relation['relation'].append(rel)
+                else:
+                    print(f"警告：跳过格式不正确的关系: {rel}")
+            if formatted_relation['relation']:  # 只添加有效的关系
+                formatted_relations.append(formatted_relation)
+                # print("格式化后的关系:", formatted_relation)
+        
+        return formatted_relations
 
     # 输入处理好的分割文本，输出bid与实体-关系三元集合
     def 知识图谱的构建(self,text=None):
@@ -121,8 +179,6 @@ class KgManager:
             # 修复BUG，应为entity和label同时传入模型导致认为标签也是实体名而非实体类型
             entity = [i[0] for i in entity_label]
             relation = self.关系提取(Bolt,entity)
-            # 没写知识融合，考虑个根据用户喜好进行融合
-            self.知识融合(relation)
             entity_labels+=entity_label
             kg_triplet += [{"bid": bid, "relation": relation}]
         self.bidirectional_mapping = self._build_bidirectional_mapping(entity_labels)
@@ -208,17 +264,6 @@ class KgManager:
             new_text,
             self.splitter.split_text)
 
-        # 输出
-        # print("新文本替换后的文本:")
-        # print(replaced_new_text)
-        #
-        # print("\n被删除的块:")
-        # for bid, text in deleted_blocks:
-        #     print(f"{bid}: {text}")
-        #
-        # print("\n新增的块:")
-        # for bid, text in added_blocks:
-        #     print(f"{bid}: {text}")
         bids_to_remove = []
 
         # 被删除的块
@@ -227,13 +272,14 @@ class KgManager:
 
         filtered_data = [item for item in self.kg_triplet if item['bid'] not in bids_to_remove]
 
-        self.store.vector_collection.delete(
-            where={"file": self.file},
-            ids=bids_to_remove
-        )
+        # 只有在有需要删除的ID时才执行删除操作
+        if bids_to_remove:
+            self.store.vector_collection.delete(
+                where={"file": self.file},
+                ids=bids_to_remove
+            )
 
         add_data = []
-
 
         # 新增的块
         for bid, text in added_blocks:

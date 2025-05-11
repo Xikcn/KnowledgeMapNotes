@@ -475,6 +475,7 @@ def process_knowledge_graph(base_name: str, text_content: str, original_filename
 
             # 知识图谱构建过程
             r = kg_manager.知识图谱的构建(text_content)
+            kg_manager.知识融合(r)
             logger.info(f"知识图谱构建完成，耗时: {time.time() - start_time:.2f}秒")
 
             # 转换为有向图
@@ -637,6 +638,7 @@ def process_update_file(original_path: str, filename: str, txt_path: str, use_im
 
         # 执行增量更新
         new_kg_triplet = kg_manager.增量更新(new_text_content)
+        new_kg_triplet = kg_manager.知识融合(new_kg_triplet)
 
         # 检查更新结果是否为空
         if not new_kg_triplet or len(new_kg_triplet) == 0:
