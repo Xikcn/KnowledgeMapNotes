@@ -217,13 +217,4 @@ class OllamaAgent:
             return answer, material
         return text, ""
 
-if __name__ == "__main__":
-    from openai import OpenAI
-    api_key = "sk-04d9a30ed67e4309a3349c314561781a"
-    client = OpenAI(
-        api_key=api_key,
-        base_url="http://localhost:11434/v1"
-    )
 
-    x = OllamaAgent(client)
-    print(x.ollama_request("","你好"))
