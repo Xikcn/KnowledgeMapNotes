@@ -3,7 +3,7 @@ import re
 import time
 
 
-class DeepSeekAgent:
+class OllamaAgent:
     def __init__(self, client):
         # 大模型
         self.client = client
@@ -16,7 +16,6 @@ class DeepSeekAgent:
         for i in range(repeat):
             try:
                 curr_gpt_response = self.ollama_request(prompt, input_parameter)
-                print(curr_gpt_response)
                 x = ""
                 if 'json' in curr_gpt_response:
                     pattern = r"```json\s*({.*?})\s*```"
@@ -27,7 +26,6 @@ class DeepSeekAgent:
                     else:
                         print("未找到匹配的 JSON 内容")
                         continue
-
                 return x
             except:
                 print("ERROR")
@@ -36,13 +34,14 @@ class DeepSeekAgent:
     def ollama_request(self, prompt, input_parameter):
         self.temp_sleep()
         response = self.client.chat.completions.create(
-            model="deepseek-chat",
+            model="qwen2.5",
             messages=[
                 {"role": "system", "content": prompt},
                 {'role': 'user', 'content': input_parameter}],
             temperature=1
         )
         output = response.choices[0].message.content
+        print(output)
         return output
 
     def ollama_safe_generate_response_rag(self, prompt, input_parameter, messages, stream, repeat=3):
@@ -130,11 +129,12 @@ class DeepSeekAgent:
             formatted_messages.extend(messages)
         formatted_messages.append({'role': 'user', 'content': input_parameter})
         response = self.rag_client.chat.completions.create(
-            model="deepseek-chat",
+            model="qwen2.5",
             messages=formatted_messages,
             temperature=1,
             stream=True
         )
+        print(response)
         return response
 
     def ollama_request_rag(self, prompt, input_parameter, messages, stream):
@@ -146,12 +146,13 @@ class DeepSeekAgent:
         formatted_messages.append({'role': 'user', 'content': input_parameter})
 
         response = self.rag_client.chat.completions.create(
-            model="deepseek-chat",
+            model="qwen2.5",
             messages=formatted_messages,
             temperature=1,
             stream=False
         )
         output = response.choices[0].message.content
+        print(output)
         return output
 
     def hybrid_rag(self, query, graph, vectors, messages, stream=False):
@@ -216,4 +217,13 @@ class DeepSeekAgent:
             return answer, material
         return text, ""
 
+if __name__ == "__main__":
+    from openai import OpenAI
+    api_key = "sk-04d9a30ed67e4309a3349c314561781a"
+    client = OpenAI(
+        api_key=api_key,
+        base_url="http://localhost:11434/v1"
+    )
 
+    x = OllamaAgent(client)
+    print(x.ollama_request("","你好"))

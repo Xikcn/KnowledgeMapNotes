@@ -16,3 +16,4 @@ spacy
 pyvis
 torch
 PyMuPDF
+python-dotenv

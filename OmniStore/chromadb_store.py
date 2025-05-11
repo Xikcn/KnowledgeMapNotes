@@ -7,8 +7,11 @@ from chromadb.utils import embedding_functions
 import time
 from embedding_tools.embedding_tools import BgeZhEmbeddingFunction
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from dotenv import load_dotenv
+import os
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+load_dotenv()  #
+device = os.getenv("DEVICE")
 
 class StoreTool:
     def __init__(self, storage_path="./chroma_data", embedding_function=None):
@@ -19,15 +22,19 @@ class StoreTool:
             # 使用默认的embedding函数（实际使用中可以替换）
             self.embedding_func = embedding_functions.DefaultEmbeddingFunction()
         else:
-            # embedder = BgeZhEmbeddingFunction(
-            #     model_path=r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6",
-            #     device=device
-            # )
-            embedder = BgeZhEmbeddingFunction(model_path=r"BAAI/bge-base-zh",device=device)
+
+            if os.getenv("IS_USE_LOCAL") == "True":
+                embedder = BgeZhEmbeddingFunction(
+                    model_path=os.getenv("EMBEDDINGS_PATH"),
+                    device=device
+                )
+            else:
+                embedder = BgeZhEmbeddingFunction(model_path=os.getenv("EMBEDDINGS"),device=device)
+
             self.embedding_func = embedder
 
 
-        model_name = "BAAI/bge-reranker-base"
+        model_name = os.getenv("RERANK_MODEL")
         rerank_model = AutoModelForSequenceClassification.from_pretrained(model_name)
         rerank_model.to(device)
         rerank_model.eval()

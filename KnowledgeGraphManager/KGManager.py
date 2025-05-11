@@ -85,14 +85,14 @@ class KgManager:
     def 实体提取(self,input_parameter):
         entity_label = []
         prompt = open("./prompt/v2/entity_extraction2.txt", encoding='utf-8').read()
-        output = self.Agent.ollama_safe_generate_response(prompt, input_parameter)
+        output = self.Agent.agent_safe_generate_response(prompt, input_parameter)
         entity_label += output["entities"]
             # print(output)
         return entity_label
 
     def 关系提取(self,input_parameter,entity):
         prompt2 = open("./prompt/v2/relationship_extraction2.txt", encoding='utf-8').read()
-        output2 = self.Agent.ollama_safe_generate_response(
+        output2 = self.Agent.agent_safe_generate_response(
             prompt2, "笔记内容：" + input_parameter + "\n实体列表：" + json.dumps(entity))
         relations = output2["relations"]
         return relations
@@ -101,6 +101,9 @@ class KgManager:
     def 知识融合(self,relations):
         pass
         relations_tuning = relations
+
+
+
         return relations_tuning
 
     # 输入处理好的分割文本，输出bid与实体-关系三元集合
@@ -122,7 +125,6 @@ class KgManager:
             self.知识融合(relation)
             entity_labels+=entity_label
             kg_triplet += [{"bid": bid, "relation": relation}]
-
         self.bidirectional_mapping = self._build_bidirectional_mapping(entity_labels)
         self.kg_triplet = kg_triplet
         return kg_triplet
@@ -464,7 +466,7 @@ class KgManager:
         prompt = open("./prompt/v2/entity_q2merge.txt", encoding='utf-8').read()
         entity = [str(i) for i in self.current_G]
         input_parameter = f"实体列表：{entity}\n问题：{text}"
-        output = self.Agent.ollama_safe_generate_response(prompt, input_parameter)
+        output = self.Agent.agent_safe_generate_response(prompt, input_parameter)
         return output['entities']
 
 

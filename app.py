@@ -4,11 +4,10 @@ from pydantic import BaseModel
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-import os
 import time
 import shutil
 import logging
-from typing import Dict, List, Optional, AsyncGenerator, Any
+from typing import Dict, List, Optional, AsyncGenerator
 from urllib.parse import quote
 from OmniStore.storeManager import storeManager
 from OmniText.PDFProcessor import PDFProcessor
@@ -17,6 +16,10 @@ import threading
 import json
 import uuid
 from collections import deque
+from dotenv import load_dotenv
+import os
+
+load_dotenv(dotenv_path="./.env")
 
 # 配置日志
 logging.basicConfig(
@@ -42,9 +45,10 @@ class rag_item(BaseModel):
 
 app = FastAPI(title="文件处理服务", description="支持文件上传和异步处理")
 
-UPLOAD_FOLDER = 'uploads'
-TXT_FOLDER = 'txt_files'
-RESULT_FOLDER = 'results'
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER")
+TXT_FOLDER = os.getenv("TXT_FOLDER")
+RESULT_FOLDER = os.getenv("RESULT_FOLDER")
+
 PROCESS_STATUS: Dict[str, str] = {}
 
 # 确保目录存在
@@ -53,43 +57,54 @@ for folder in [UPLOAD_FOLDER, TXT_FOLDER, RESULT_FOLDER]:
 
 # 初始化知识图谱组件
 from OmniStore.chromadb_store import StoreTool
-from LLM.Deepseek_agent import DeepSeekAgent
 from sentence_transformers import SentenceTransformer
 from KnowledgeGraphManager.KGManager import KgManager
-from TextSlicer.SimpleTextSplitter import SemanticTextSplitter
-import torch
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# 初始化模型和组件
-embeddings = SentenceTransformer('BAAI/bge-base-zh').to(device)
 
-# embeddings = SentenceTransformer(
-#     r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6"
-#     ).to(device)
 
-api_key = "sk-xx"
+device = os.getenv("DEVICE")
+
+
+if os.getenv("IS_USE_LOCAL") == "True":
+    embeddings = SentenceTransformer(
+        os.getenv("EMBEDDINGS_PATH")
+    ).to(device)
+else:
+    # 初始化模型和组件
+    embeddings = SentenceTransformer(os.getenv("EMBEDDINGS")).to(device)
+
 
 # 创建两个独立的存储工具
-chromadb_store = StoreTool(storage_path="./chroma_data", embedding_function=embeddings)
+chromadb_store = StoreTool(storage_path= os.getenv("CHROMADB_PATH"), embedding_function=embeddings)
 
 client = OpenAI(
-    api_key=api_key,
-    base_url="https://api.deepseek.com"
+    api_key=os.getenv("API_KEY"),
+    base_url=os.getenv("BASE_URL")
 )
 
 # 多模态模型
 vl_client = OpenAI(
     # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx"
-    api_key='sk-xx',
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    api_key=os.getenv("VL_API_KEY"),
+    base_url=os.getenv("VL_BASE_URL")
 )
-
+from LLM.Openai_Agent import OpenaiAgent
 # 创建两个独立的agent
-rag_agent = DeepSeekAgent(client)
-kg_agent = DeepSeekAgent(client)
+rag_agent = OpenaiAgent(client)
+kg_agent = OpenaiAgent(client)
 
 # 创建两个独立的splitter
-kg_splitter = SemanticTextSplitter(2045, 1024)
+if os.getenv("SPLITTER_MODE") == "SemanticTextSplitter":
+    from TextSlicer.SemanticTextSplitter import SemanticTextSplitter
+    kg_splitter = SemanticTextSplitter(2045, 1024)
+elif os.getenv("SPLITTER_MODE") == "SimpleTextSplitter":
+    from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
+    kg_splitter = SimpleTextSplitter(2045, 1024)
+else:
+    from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
+    kg_splitter = SimpleTextSplitter(2045, 1024)
+
+
 
 # 创建两个独立的kg_manager
 kg_manager = KgManager(agent=kg_agent, splitter=kg_splitter, embedding_model=embeddings, store=chromadb_store)

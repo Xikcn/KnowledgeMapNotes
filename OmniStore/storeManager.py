@@ -60,8 +60,9 @@ class  storeManager:
         prompt = open("./prompt/v2/entity_q2merge.txt", encoding='utf-8').read()
         entity = [str(i) for i in current_g]
         input_parameter = f"实体列表：{entity}\n问题：{query}"
-        output = self.agent.ollama_safe_generate_response(prompt, input_parameter)
-        return output['entities']
+        output = self.agent.agent_safe_generate_response(prompt, input_parameter)
+        return output.get("entities",[])
+
 
     def select_vectors(self, query, file, n_results):
         try:

@@ -1,9 +1,14 @@
 import json
 import re
 import time
+from dotenv import load_dotenv
+import os
 
+load_dotenv()  # 默认会加载根目录下的.env文件
+model = os.getenv("MODEL_NAME")
+temperature  =  float(os.getenv("TEMPERATURE"))
 
-class DeepSeekAgent:
+class OpenaiAgent:
     def __init__(self, client):
         # 大模型
         self.client = client
@@ -12,11 +17,10 @@ class DeepSeekAgent:
     def temp_sleep(self, seconds=0.1):
         time.sleep(seconds)
 
-    def ollama_safe_generate_response(self, prompt, input_parameter, repeat=3):
+    def agent_safe_generate_response(self, prompt, input_parameter, repeat=3):
         for i in range(repeat):
             try:
-                curr_gpt_response = self.ollama_request(prompt, input_parameter)
-                print(curr_gpt_response)
+                curr_gpt_response = self.agent_request(prompt, input_parameter)
                 x = ""
                 if 'json' in curr_gpt_response:
                     pattern = r"```json\s*({.*?})\s*```"
@@ -33,25 +37,25 @@ class DeepSeekAgent:
                 print("ERROR")
         return -1
 
-    def ollama_request(self, prompt, input_parameter):
+    def agent_request(self, prompt, input_parameter):
         self.temp_sleep()
         response = self.client.chat.completions.create(
-            model="deepseek-chat",
+            model=model,
             messages=[
                 {"role": "system", "content": prompt},
                 {'role': 'user', 'content': input_parameter}],
-            temperature=1
+            temperature=temperature
         )
         output = response.choices[0].message.content
         return output
 
-    def ollama_safe_generate_response_rag(self, prompt, input_parameter, messages, stream, repeat=3):
+    def agent_safe_generate_response_rag(self, prompt, input_parameter, messages, stream, repeat=3):
         for i in range(repeat):
             try:
                 if stream:
                     # 流式输出需要特殊处理
                     response_content = ""
-                    response_stream = self.ollama_request_rag_stream(prompt, input_parameter, messages)
+                    response_stream = self.agent_request_rag_stream(prompt, input_parameter, messages)
                     for chunk in response_stream:
                         if hasattr(chunk.choices[0].delta, 'content') and chunk.choices[0].delta.content is not None:
                             response_content += chunk.choices[0].delta.content
@@ -86,7 +90,7 @@ class DeepSeekAgent:
                     return {"answer": answer, "material": material}
                 else:
                     # 非流式输出处理方式不变
-                    curr_gpt_response = self.ollama_request_rag(prompt, input_parameter, messages, stream)
+                    curr_gpt_response = self.agent_request_rag(prompt, input_parameter, messages, stream)
                     x = ""
                     if 'json' in curr_gpt_response:
                         pattern = r"```json\s*({.*?})\s*```"
@@ -122,7 +126,7 @@ class DeepSeekAgent:
                 traceback.print_exc()
         return -1
 
-    def ollama_request_rag_stream(self, prompt, input_parameter, messages):
+    def agent_request_rag_stream(self, prompt, input_parameter, messages):
         """流式请求方法"""
         # 确保消息格式正确
         formatted_messages = [{"role": "system", "content": prompt}]
@@ -130,14 +134,14 @@ class DeepSeekAgent:
             formatted_messages.extend(messages)
         formatted_messages.append({'role': 'user', 'content': input_parameter})
         response = self.rag_client.chat.completions.create(
-            model="deepseek-chat",
+            model=model,
             messages=formatted_messages,
-            temperature=1,
+            temperature=temperature,
             stream=True
         )
         return response
 
-    def ollama_request_rag(self, prompt, input_parameter, messages, stream):
+    def agent_request_rag(self, prompt, input_parameter, messages, stream):
         """非流式请求方法"""
         # 确保消息格式正确
         formatted_messages = [{"role": "system", "content": prompt}]
@@ -146,9 +150,9 @@ class DeepSeekAgent:
         formatted_messages.append({'role': 'user', 'content': input_parameter})
 
         response = self.rag_client.chat.completions.create(
-            model="deepseek-chat",
+            model=model,
             messages=formatted_messages,
-            temperature=1,
+            temperature=temperature,
             stream=False
         )
         output = response.choices[0].message.content
@@ -169,7 +173,7 @@ class DeepSeekAgent:
         if messages and isinstance(messages[0], dict):
             messages = [{"role": msg.get("role", ""), "content": msg.get("content", "")} for msg in messages]
 
-        output = self.ollama_safe_generate_response_rag(prompt, input_parameter, messages, stream)
+        output = self.agent_safe_generate_response_rag(prompt, input_parameter, messages, stream)
         return output
 
     def hybrid_rag_stream(self, query, graph, vectors, messages):
@@ -193,7 +197,7 @@ class DeepSeekAgent:
             messages = [{"role": msg.get("role", ""), "content": msg.get("content", "")} for msg in messages]
 
         # 直接返回流对象，不进行封装处理
-        return self.ollama_request_rag_stream(prompt, input_parameter, messages)
+        return self.agent_request_rag_stream(prompt, input_parameter, messages)
 
     def process_hybrid_rag_stream_chunk(self, chunk):
         """
