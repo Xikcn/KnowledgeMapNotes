@@ -345,6 +345,41 @@ class KgManager:
                       border-radius: 5px;
                       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
                   }
+                  .search-panel {
+                      position: absolute;
+                      top: 10px;
+                      left: 10px;
+                      z-index: 1000;
+                      background: rgba(255,255,255,0.9);
+                      padding: 10px;
+                      border-radius: 5px;
+                      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                      width: 300px;
+                  }
+                  .search-input {
+                      width: 100%;
+                      padding: 8px;
+                      margin: 5px 0;
+                      border: 1px solid #ddd;
+                      border-radius: 4px;
+                      box-sizing: border-box;
+                  }
+                  .search-results {
+                      max-height: 200px;
+                      overflow-y: auto;
+                      margin-top: 10px;
+                      border: 1px solid #ddd;
+                      border-radius: 4px;
+                      background: white;
+                  }
+                  .search-result-item {
+                      padding: 8px;
+                      cursor: pointer;
+                      border-bottom: 1px solid #eee;
+                  }
+                  .search-result-item:hover {
+                      background: #f5f5f5;
+                  }
                   .control-btn {
                       padding: 8px 12px;
                       margin: 5px;
@@ -385,6 +420,7 @@ class KgManager:
               // 全局状态管理
               const edgeStates = {};
               let globalHideMode = true;
+              let searchTimeout = null;
 
               document.addEventListener("DOMContentLoaded", function() {
                   // 初始化所有边状态
@@ -397,6 +433,17 @@ class KgManager:
 
                   // 创建控制面板
                   const container = document.getElementById("mynetwork");
+                  
+                  // 创建搜索面板
+                  const searchPanel = document.createElement("div");
+                  searchPanel.className = "search-panel";
+                  searchPanel.innerHTML = `
+                      <input type="text" id="searchInput" class="search-input" placeholder="搜索实体或关系...">
+                      <div class="search-results" id="searchResults"></div>
+                  `;
+                  container.parentNode.insertBefore(searchPanel, container);
+
+                  // 创建控制面板
                   const panel = document.createElement("div");
                   panel.className = "control-panel";
                   panel.innerHTML = `
@@ -407,6 +454,77 @@ class KgManager:
                       <div class="status-indicator">已复习: <span id="counter">0</span>/${network.body.data.edges.get().length}</div>
                   `;
                   container.parentNode.insertBefore(panel, container);
+
+                  // 搜索功能
+                  const searchInput = document.getElementById("searchInput");
+                  const searchResults = document.getElementById("searchResults");
+
+                  searchInput.addEventListener("input", function() {
+                      clearTimeout(searchTimeout);
+                      searchTimeout = setTimeout(() => {
+                          const searchTerm = this.value.toLowerCase();
+                          if (searchTerm.length < 2) {
+                              searchResults.innerHTML = "";
+                              return;
+                          }
+
+                          const results = [];
+                          // 搜索节点
+                          network.body.data.nodes.get().forEach(node => {
+                              if (node.label.toLowerCase().includes(searchTerm)) {
+                                  results.push({
+                                      type: "node",
+                                      id: node.id,
+                                      label: node.label
+                                  });
+                              }
+                          });
+
+                          // 搜索边
+                          network.body.data.edges.get().forEach(edge => {
+                              if (edge.label && edge.label.toLowerCase().includes(searchTerm)) {
+                                  results.push({
+                                      type: "edge",
+                                      id: edge.id,
+                                      label: edge.label
+                                  });
+                              }
+                          });
+
+                          // 显示结果
+                          searchResults.innerHTML = results.map(result => `
+                              <div class="search-result-item" data-type="${result.type}" data-id="${result.id}">
+                                  ${result.type === "node" ? "节点" : "关系"}: ${result.label}
+                              </div>
+                          `).join("");
+
+                          // 添加点击事件
+                          searchResults.querySelectorAll(".search-result-item").forEach(item => {
+                              item.addEventListener("click", function() {
+                                  const type = this.dataset.type;
+                                  const id = this.dataset.id;
+                                  
+                                  if (type === "node") {
+                                      // 高亮节点
+                                      network.selectNodes([id]);
+                                      network.focus(id, {
+                                          scale: 1.5,
+                                          animation: true
+                                      });
+                                  } else {
+                                      // 高亮边
+                                      network.selectEdges([id]);
+                                      const edge = network.body.data.edges.get(id);
+                                      network.focus({
+                                          nodes: [edge.from, edge.to],
+                                          scale: 1.5,
+                                          animation: true
+                                      });
+                                  }
+                              });
+                          });
+                      }, 300);
+                  });
 
                   // 更新计数器
                   function updateCounter() {
