@@ -94,7 +94,19 @@ class KgManager:
         prompt2 = open("./prompt/v2/relationship_extraction2.txt", encoding='utf-8').read()
         output2 = self.Agent.agent_safe_generate_response(
             prompt2, "笔记内容：" + input_parameter + "\n实体列表：" + json.dumps(entity))
-        relations = output2["relations"]
+        
+        # 确保从输出中获取正确的relations和weight值
+        relations = output2.get("relations", [])
+        
+        # 确保权重是浮点数类型
+        for relation in relations:
+            if 'weight' not in relation:
+                relation['weight'] = 0.5
+            else:
+                # 确保weight是浮点数类型
+                relation['weight'] = float(relation['weight'])
+                
+        # print("原始关系权重:", [(rel['source'], rel['target'], rel['weight']) for rel in relations])
         return relations
 
 
@@ -123,7 +135,12 @@ class KgManager:
                 input_text = f"实体1：{entity_pair[0]}\n实体2：{entity_pair[1]}\n"
                 input_text += "现有关系：\n"
                 for rel in rel_list:
-                    input_text += f"- {rel['relation']['relation']}（上下文：{rel['relation']['context']}）\n"
+                    # 确保获取到的权重是浮点数
+                    try:
+                        weight = float(rel['relation'].get('weight', 0.5))
+                    except (ValueError, TypeError):
+                        weight = 0.5
+                    input_text += f"- {rel['relation']['relation']}（上下文：{rel['relation']['context']}，权重：{weight}）\n"
                 
                 # 读取提示词模板
                 prompt = open("./prompt/v2/knowledge_fusion.txt", encoding='utf-8').read()
@@ -133,11 +150,22 @@ class KgManager:
                 merged_result = self.Agent.agent_safe_generate_response(prompt, input_text)
                 print(merged_result, "merged_result")
                 
+                # 确保融合后的关系中包含权重
+                for rel in merged_result.get('relations', []):
+                    if 'weight' not in rel:
+                        rel['weight'] = 0.5
+                    else:
+                        # 确保weight是浮点数
+                        try:
+                            rel['weight'] = float(rel['weight'])
+                        except (ValueError, TypeError):
+                            rel['weight'] = 0.5
+                
                 # 将融合后的关系添加到结果中
                 for rel in rel_list:
                     merged_relations.append({
                         'bid': rel['bid'],
-                        'relation': merged_result['relations']  # 使用完整的融合后关系列表
+                        'relation': merged_result.get('relations', [])  # 使用完整的融合后关系列表
                     })
             else:
                 # 对于只有一个关系的实体对，直接保留原关系
@@ -155,12 +183,22 @@ class KgManager:
             }
             for rel in relation['relation']:
                 if isinstance(rel, dict) and all(k in rel for k in ['source', 'target', 'relation', 'context']):
+                    # 确保权重字段存在且为浮点数
+                    if 'weight' not in rel:
+                        rel['weight'] = 0.5
+                    else:
+                        try:
+                            rel['weight'] = float(rel['weight'])
+                        except (ValueError, TypeError):
+                            print(f"警告: 无法将权重 '{rel['weight']}' 转换为浮点数，使用默认值0.5")
+                            rel['weight'] = 0.5
+                    
                     formatted_relation['relation'].append(rel)
+                    # print(f"添加关系: {rel['source']} -> {rel['target']}, 权重: {rel['weight']}")
                 else:
                     print(f"警告：跳过格式不正确的关系: {rel}")
             if formatted_relation['relation']:  # 只添加有效的关系
                 formatted_relations.append(formatted_relation)
-                # print("格式化后的关系:", formatted_relation)
         
         return formatted_relations
 
@@ -195,7 +233,15 @@ class KgManager:
                 source = rel['source']
                 target = rel['target']
                 context = rel['context']
-                relation = rel['relation']
+                relation_text = rel['relation']
+                # 获取权重，确保是浮点数
+                try:
+                    weight = float(rel.get('weight', 0.5))
+                except (ValueError, TypeError):
+                    print(f"警告: 无法转换权重值 '{rel.get('weight')}' 为浮点数，使用默认值0.5")
+                    weight = 0.5
+                
+                # print(f"添加边 {source} -> {target} 权重: {weight}")
 
                 # 添加节点
                 self.current_G.add_node(source,
@@ -208,11 +254,12 @@ class KgManager:
                 # 添加边（初始状态）
                 self.current_G.add_edge(source, target,
                                         title=context,
-                                        label=relation,
+                                        label=relation_text,
+                                        weight=weight,  # 添加权重
                                         font={"size": 0},  # 初始标签隐藏
                                         color='#97c2fc',
-                                        width=2,
-                                        hoverWidth=4,
+                                        width=1 + weight * 3,  # 根据权重调整边的粗细
+                                        hoverWidth=3 + weight * 2,
                                         chosen={  # 点击选中样式
                                             "edge": {
                                                 "color": "#00FF00",
@@ -297,6 +344,7 @@ class KgManager:
         # 使用pyvis可视化
         net = Network(notebook=True, height="750px", width="100%",
                       bgcolor="#ffffff", font_color="black", directed=True)
+        
         # 配置选项
         options = {
             "edges": {
@@ -311,19 +359,54 @@ class KgManager:
                     "hover": "#FFA500"
                 },
                 "selectionWidth": 1.5,
-                "smooth": {"type": "continuous"}
+                "smooth": {"type": "continuous"},
+                "scaling": {
+                    "min": 1,
+                    "max": 10,
+                    "label": {
+                        "enabled": True,
+                        "min": 14,
+                        "max": 30
+                    }
+                }
             },
             "interaction": {
                 "hover": True,
                 "tooltipDelay": 150,
                 "hideEdgesOnDrag": False,
                 "multiselect": True  # 允许多选
+            },
+            "physics": {
+                "stabilization": {
+                    "enabled": True,
+                    "iterations": 1000,
+                    "updateInterval": 100
+                }
             }
         }
         net.set_options(json.dumps(options, indent=2))
-
-        # 从NetworkX图导入数据
-        net.from_nx(self.current_G)
+        
+        # 手动添加节点和边，确保权重正确应用
+        for node, attr in self.current_G.nodes(data=True):
+            net.add_node(node, title=attr.get('title', ''), group=attr.get('group', ''))
+        
+        # 添加所有边，确保权重被正确应用
+        for source, target, attr in self.current_G.edges(data=True):
+            weight = attr.get('weight', 0.5)
+            # print(f"添加边到pyvis: {source} -> {target}, 权重: {weight}")
+            # 计算基于权重的宽度
+            width = 1 + weight * 4
+            net.add_edge(
+                source=source, 
+                to=target, 
+                title=attr.get('title', ''),
+                label=attr.get('label', ''),
+                weight=weight,
+                width=width,  # 显式设置宽度
+                font={"size": 0},
+                color='#97c2fc',
+                hoverWidth=3 + weight * 2
+            )
 
         # 生成HTML文件
         html_file = f"{name}.html"
@@ -594,13 +677,45 @@ class KgManager:
                       updateCounter();
                   });
 
-                  // 悬停边时高亮
+                  // 悬停边时高亮并显示权重信息
                   network.on("hoverEdge", function(params) {
                       const edge = network.body.data.edges.get(params.edge);
                       if (!edgeStates[edge.id].clicked) {
                           edge.color = {color: "#FFA500", highlight: "#FFA500"};
                           network.body.data.edges.update(edge);
                       }
+                      
+                      // 创建权重提示框
+                      let title = edge.title || '';
+                      let label = edge.label || '';
+                      let weight = edge.weight || 0.5;
+                      
+                      // 创建或更新悬停提示
+                      let tooltip = document.getElementById('edge-tooltip');
+                      if (!tooltip) {
+                          tooltip = document.createElement('div');
+                          tooltip.id = 'edge-tooltip';
+                          tooltip.style.position = 'absolute';
+                          tooltip.style.backgroundColor = 'rgba(0,0,0,0.7)';
+                          tooltip.style.color = 'white';
+                          tooltip.style.padding = '8px';
+                          tooltip.style.borderRadius = '4px';
+                          tooltip.style.zIndex = '1000';
+                          tooltip.style.maxWidth = '300px';
+                          document.body.appendChild(tooltip);
+                      }
+                      
+                      // 设置提示内容
+                      tooltip.innerHTML = `
+                          <div><strong>关系:</strong> ${label}</div>
+                          <div><strong>上下文:</strong> ${title}</div>
+                          <div><strong>权重:</strong> ${weight.toFixed(2)}</div>
+                      `;
+                      
+                      // 定位提示框
+                      tooltip.style.left = (event.clientX + 10) + 'px';
+                      tooltip.style.top = (event.clientY + 10) + 'px';
+                      tooltip.style.display = 'block';
                   });
 
                   // 移出边时恢复
@@ -609,6 +724,12 @@ class KgManager:
                       if (!edgeStates[edge.id].clicked) {
                           edge.color = {color: "#97c2fc", highlight: "#97c2fc"};
                           network.body.data.edges.update(edge);
+                      }
+                      
+                      // 隐藏提示框
+                      const tooltip = document.getElementById('edge-tooltip');
+                      if (tooltip) {
+                          tooltip.style.display = 'none';
                       }
                   });
 
@@ -634,50 +755,73 @@ class KgManager:
         return output['entities']
 
 
-    # 社区搜索
-    def community_louvain_G(self,entity_names):
-        knowledge_base = []
-        # 执行社区检测（在整个图上）
-        partition = community_louvain.best_partition(self.current_G.to_undirected())
-        for node, community_id in partition.items():
-            pass
-            # print(f"Node {node} belongs to community {community_id}")
-
-        # 获取每个输入实体的社区编号
-        community_ids = set()
-        for entity in entity_names:
-            if entity in partition:
-                community_ids.add(partition[entity])
-
-        # 提取特定社区内的所有节点
-        community_nodes = [node for node, comm_id in partition.items() if comm_id in community_ids]
-
-        # 构建包含选定社区内所有节点的子图
-        subgraph = self.current_G.subgraph(community_nodes)
-
-        # 输出结果
-        # print("Selected Community Nodes and Edges:")
-
-        # 打印每个节点及其社区编号和属性
-        for node in subgraph.nodes(data=True):
-            node_name = node[0]
-            node_attributes = node[1]
-            community_id = partition.get(node_name, 'No Community')
-            # print(f"Node: {node_name}, Attributes: {node_attributes}, Community ID: {community_id}")
-
-        # 打印边的信息，检查是否存在'title'属性，如果不存在则使用默认值
-        for edge in subgraph.edges(data=True):
-            relation = edge[2].get('title', 'No Title')  # 如果没有'title'属性，则返回默认值'No Title'
-            # print(edge,111111111111111)
-            # print(f"Edge from {edge[0]} to {edge[1]}, Relation: {relation}")
-            knowledge_base.append(
-                f"Edge from {edge[0]} to {edge[1]}, Relation: {relation}, context:{edge[2].get('title', 'No Title')}")
-
-        # 如果需要更详细的社区信息，可以计算模块度等
-        modularity = community_louvain.modularity(partition, self.current_G.to_undirected())
-        print(f"\nModularity of the entire graph: {modularity}")
-
-        return knowledge_base
+    # # 社区搜索
+    # def community_louvain_G(self, entity_names, weight_threshold=0.3, top_n=None):
+    #     """
+    #     基于社区算法和权重阈值查找相关知识
+    #
+    #     Args:
+    #         entity_names: 输入的实体名称列表
+    #         weight_threshold: 权重阈值，默认0.3，只返回权重大于此值的关系
+    #         top_n: 每个社区返回的最大关系数量，默认None表示返回所有符合条件的关系
+    #
+    #     Returns:
+    #         知识库列表
+    #     """
+    #     knowledge_base = []
+    #     # 执行社区检测（在整个图上）
+    #     partition = community_louvain.best_partition(self.current_G.to_undirected())
+    #
+    #     # 获取每个输入实体的社区编号
+    #     community_ids = set()
+    #     for entity in entity_names:
+    #         if entity in partition:
+    #             community_ids.add(partition[entity])
+    #     print(community_ids)
+    #     # 提取特定社区内的所有节点
+    #     community_nodes = [node for node, comm_id in partition.items() if comm_id in community_ids]
+    #
+    #     # 构建包含选定社区内所有节点的子图
+    #     subgraph = self.current_G.subgraph(community_nodes)
+    #
+    #     # 收集所有边信息并根据权重排序
+    #     edges_with_weight = []
+    #     for edge in subgraph.edges(data=True):
+    #         source, target = edge[0], edge[1]
+    #         edge_data = edge[2]
+    #         # 从边属性中获取数据
+    #         relation = edge_data.get('label', 'Unknown')
+    #         context = edge_data.get('title', 'No Context')
+    #         weight = edge_data.get('weight', 0.5)  # 获取权重，默认0.5
+    #
+    #         # 只添加权重大于等于阈值的边
+    #         if weight >= weight_threshold:
+    #             edges_with_weight.append({
+    #                 'source': source,
+    #                 'target': target,
+    #                 'relation': relation,
+    #                 'context': context,
+    #                 'weight': weight
+    #             })
+    #
+    #     # 按权重降序排序
+    #     edges_with_weight.sort(key=lambda x: x['weight'], reverse=True)
+    #     print(edges_with_weight,"test")
+    #     # 如果指定了top_n，则只取前top_n个关系
+    #     if top_n is not None and top_n > 0:
+    #         edges_with_weight = edges_with_weight[:top_n]
+    #
+    #     # 转换为知识库格式
+    #     for edge in edges_with_weight:
+    #         knowledge_base.append(
+    #             f"Edge from {edge['source']} to {edge['target']}, Relation: {edge['relation']}, context:{edge['context']}, weight:{edge['weight']}"
+    #         )
+    #
+    #     # 计算模块度
+    #     modularity = community_louvain.modularity(partition, self.current_G.to_undirected())
+    #     print(f"\nModularity of the entire graph: {modularity}")
+    #
+    #     return knowledge_base
 
 
     # 对比两个有向图对象的差异

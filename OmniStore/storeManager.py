@@ -78,7 +78,19 @@ class  storeManager:
             return []
 
 
-    def community_louvain_G(self,file,entity_names):
+    def community_louvain_G(self, file, entity_names, weight_threshold=0.3, top_n=20):
+        """
+        基于社区算法和权重阈值查找相关知识
+        
+        Args:
+            file: 文件名
+            entity_names: 输入的实体名称列表
+            weight_threshold: 权重阈值，默认0.3，只返回权重大于此值的关系
+            top_n: 返回的最大关系数量，默认20
+            
+        Returns:
+            知识库列表
+        """
         current_G = self.get_G(file)
         if current_G is None:
             print(f"无法获取知识图谱数据进行社区检测: {file}")
@@ -88,10 +100,7 @@ class  storeManager:
 
         # 执行社区检测（在整个图上）
         partition = community_louvain.best_partition(current_G.to_undirected())
-        for node, community_id in partition.items():
-            pass
-            # print(f"Node {node} belongs to community {community_id}")
-
+        
         # 获取每个输入实体的社区编号
         community_ids = set()
         for entity in entity_names:
@@ -104,25 +113,40 @@ class  storeManager:
         # 构建包含选定社区内所有节点的子图
         subgraph = current_G.subgraph(community_nodes)
 
-        # 输出结果
-        # print("Selected Community Nodes and Edges:")
-
-        # 打印每个节点及其社区编号和属性
-        for node in subgraph.nodes(data=True):
-            node_name = node[0]
-            node_attributes = node[1]
-            community_id = partition.get(node_name, 'No Community')
-            # print(f"Node: {node_name}, Attributes: {node_attributes}, Community ID: {community_id}")
-
-        # 打印边的信息，检查是否存在'title'属性，如果不存在则使用默认值
+        # 收集所有边信息并根据权重排序
+        edges_with_weight = []
         for edge in subgraph.edges(data=True):
-            relation = edge[2].get('title', 'No Title')  # 如果没有'title'属性，则返回默认值'No Title'
-            # print(edge,111111111111111)
-            # print(f"Edge from {edge[0]} to {edge[1]}, Relation: {relation}")
+            source, target = edge[0], edge[1]
+            edge_data = edge[2]
+            # 从边属性中获取数据
+            relation = edge_data.get('label', 'Unknown')
+            context = edge_data.get('title', 'No Context')
+            weight = edge_data.get('weight', 0.5)  # 获取权重，默认0.5
+            
+            # 只添加权重大于等于阈值的边
+            if weight >= weight_threshold:
+                edges_with_weight.append({
+                    'source': source,
+                    'target': target,
+                    'relation': relation,
+                    'context': context,
+                    'weight': weight
+                })
+        
+        # 按权重降序排序
+        edges_with_weight.sort(key=lambda x: x['weight'], reverse=True)
+        print(edges_with_weight, "test")
+        # 如果指定了top_n，则只取前top_n个关系
+        if top_n > 0:
+            edges_with_weight = edges_with_weight[:top_n]
+        
+        # 转换为知识库格式
+        for edge in edges_with_weight:
             knowledge_base.append(
-                f"Edge from {edge[0]} to {edge[1]}, Relation: {relation}, context:{edge[2].get('title', 'No Title')}")
+                f"Edge from {edge['source']} to {edge['target']}, Relation: {edge['relation']}, context:{edge['context']}, weight:{edge['weight']}"
+            )
 
-        # 如果需要更详细的社区信息，可以计算模块度等
+        # 计算模块度
         modularity = community_louvain.modularity(partition, current_G.to_undirected())
         print(f"\nModularity of the entire graph: {modularity}")
 

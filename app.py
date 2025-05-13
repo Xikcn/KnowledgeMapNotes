@@ -38,6 +38,8 @@ class rag_item(BaseModel):
     model: str
     flow: bool = False
     top_k: int = 1
+    weight_threshold: float = 0.3  # 添加权重阈值参数
+    max_relations: int = 20  # 添加最大关系数量参数
     filename: Optional[str] = None
     messages: Optional[List[Dict[str, str]]] = None  # 确保消息格式正确
     session_id: Optional[str] = None  # 会话ID，用于跟踪特定文件的对话
@@ -246,7 +248,8 @@ async def hybridrag_stream(item: rag_item):
 
                         # 执行RAG流程 - 社区检测，使用RAG专用线程池
                         community_info = await loop.run_in_executor(rag_executor, store_manager.community_louvain_G,
-                                                                    base_name, rag_entity)
+                                                                    base_name, rag_entity, item.weight_threshold, 
+                                                                    item.max_relations)
                         if not community_info:  # 如果返回空列表
                             logger.warning(f"未能进行社区检测: {item.filename}")
                             community_info = []  # 确保是空列表而不是None
@@ -379,7 +382,8 @@ async def process_session_queue(session_id: str):
                     rag_entity = await loop.run_in_executor(rag_executor, store_manager.text2entity, item.request,
                                                             base_name)
                     community_info = await loop.run_in_executor(rag_executor, store_manager.community_louvain_G,
-                                                                base_name, rag_entity)
+                                                                base_name, rag_entity, item.weight_threshold, 
+                                                                item.max_relations)
                     results = await loop.run_in_executor(rag_executor, store_manager.select_vectors, item.request,
                                                          base_name, item.top_k)
 
