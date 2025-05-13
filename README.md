@@ -5,24 +5,26 @@
 https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 
 ## 项目简介
-这是一个基于知识图谱的笔记系统，通过将PDF文档转换为知识图谱，实现高效的知识管理和检索。系统支持PDF文档处理、实体关系提取、知识图谱构建与可视化，并提供基于RAG和知识图谱的智能问答功能。
+这是一个基于知识图谱的笔记系统，通过将PDF文档转换为知识图谱，实现高效的知识管理和检索。系统支持PDF文档处理、实体关系提取、知识图谱构建与可视化，并提供基于RAG和知识图谱的智能问答功能。系统创新性地引入关系权重机制，能够根据关系重要性智能筛选和排序结果，大幅提高查询效率和准确性。
 
 ## 主要功能
 - PDF文档处理与转换
 - 知识图谱自动构建
 - 文档智能问答
-- 知识实体关系可视化
+- 知识实体关系可视化（支持权重展示）
+- 基于权重的关系筛选与排序
+- 社区检测与智能推荐
 - 增量更新知识库
 
 ## 技术栈
 ### 后端功能实现
-1. pdf转txt（提取pdf的表格，获取图片信息）
+1. PDF转TXT（提取PDF的表格，获取图片信息）
 2. 向量数据库（ChromaDB）
 3. 提示词工程
-4. RAG，HybridRAG
-5. 知识图谱构建（kg-gen）
-6. 图的社区查询
-7. 消息队列（采用简单方式，不采用redis方便单机部署）
+4. RAG、HybridRAG技术
+5. 知识图谱构建（KG-gen）
+6. 权重机制与社区查询
+7. 消息队列（采用简单方式，不采用Redis方便单机部署）
 8. 增量更新（增加新增块的实体与关系，删除消失块相关实体与关系）
 9. FastAPI
 
@@ -35,10 +37,76 @@ https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 
 ## 系统架构
 - 文档处理模块：负责PDF文档的解析和文本提取
-- 知识图谱模块：实现实体识别、关系抽取和知识图谱构建
+- 知识图谱模块：实现实体识别、关系抽取、权重计算和知识图谱构建
 - 检索模块：基于向量数据库的语义检索
+- 权重筛选模块：基于重要性权重筛选和排序关系
 - API服务：FastAPI实现的RESTful接口
 - 前端应用：Vue3实现的用户界面
+
+## 配置文件管理
+系统通过环境变量配置文件(.env)灵活管理模型和功能设置，关键配置参数包括：
+
+### 基础配置
+- `UPLOAD_FOLDER`：文件上传目录
+- `TXT_FOLDER`：处理后文本存储目录
+- `RESULT_FOLDER`：结果输出目录
+- `CHROMADB_PATH`：向量数据库存储路径
+
+### 模型配置
+- `MODEL_NAME`：使用的LLM模型名称
+- `TEMPERATURE`：模型温度参数
+- `API_KEY`：LLM API密钥
+- `BASE_URL`：LLM API基础URL
+- `EMBEDDINGS`：嵌入模型名称
+- `EMBEDDINGS_PATH`：本地嵌入模型路径
+- `DEVICE`：运行设备（cuda/cpu）
+
+### 多模态配置
+- `VL_API_KEY`：视觉语言模型API密钥
+- `VL_BASE_URL`：视觉语言模型API基础URL
+
+### 功能开关
+- `IS_USE_LOCAL`：是否使用本地模型（True/False）
+- `SPLITTER_MODE`：文本分割器模式（SemanticTextSplitter/SimpleTextSplitter）
+
+### 配置示例
+```
+# 基础路径配置
+UPLOAD_FOLDER=./uploads
+TXT_FOLDER=./txt_files
+RESULT_FOLDER=./results
+CHROMADB_PATH=./chroma_data
+
+# 模型配置
+MODEL_NAME=gpt-3.5-turbo
+TEMPERATURE=0.7
+API_KEY=your_api_key
+BASE_URL=https://api.openai.com/v1
+DEVICE=cpu
+
+# 嵌入模型配置
+EMBEDDINGS=BAAI/bge-base-zh
+EMBEDDINGS_PATH=D:/Models_Home/Huggingface/hub/models--BAAI--bge-base-zh/snapshots/0e5f83d4895db7955e4cb9ed37ab73f7ded339b6
+IS_USE_LOCAL=True
+
+# 多模态配置
+VL_API_KEY=your_vl_api_key
+VL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+# 功能配置
+SPLITTER_MODE=SimpleTextSplitter
+```
+
+通过修改这些配置参数，可以灵活切换不同的模型、调整性能参数和控制功能开关，无需修改代码即可适应不同的部署环境和使用场景。
+
+## 权重功能详解
+系统创新性地引入了0-1之间的关系权重机制，用于表示实体间关系的重要性：
+- 提取关系时自动计算权重，反映关系在当前语境中的重要程度
+- 知识融合过程保留权重信息，对冲突关系进行权重融合
+- 可视化时通过边的粗细直观展示关系重要性，重要关系线条更粗
+- 社区查询支持权重阈值筛选，只返回权重大于阈值的关系
+- 查询结果按权重排序，确保最重要的信息优先展示
+- API支持weight_threshold和max_relations参数，灵活控制结果
 
 ## 详细使用说明
 ### 文档上传与处理
@@ -52,19 +120,36 @@ https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 2. 点击"查看知识图谱"按钮
 3. 系统会显示文档的知识图谱可视化结果
 4. 可以通过点击节点查看详细信息，或者使用搜索功能定位特定实体
+5. 悬停在关系线上可以查看关系详情和权重信息
 
 ### 智能问答
 1. 在文档列表中选择要问答的文档
 2. 点击"开始问答"按钮
 3. 在输入框中输入问题
 4. 系统会基于文档内容和知识图谱提供回答
+5. 可以调整权重阈值，筛选更重要的知识进行回答
 
 ## 安装与使用
 ### 环境要求
 - Python 3.8+
 - Node.js 16+
 - CUDA支持（推荐）
-- torch( 可选，不用删除代码中的相关部分即可，不影响使用，主要是to() )
+- Torch（可选，不用删除代码中的相关部分即可，不影响使用，主要是to()）
+
+### 环境配置
+1. 创建并配置`.env`文件
+```bash
+# 复制配置模板（如果存在）或手动创建
+# cp .env.example .env
+touch .env
+# 使用文本编辑器填写必要的配置参数
+nano .env
+```
+
+2. 关键配置说明
+   - 必须配置的项: API_KEY、BASE_URL
+   - 如果使用本地模型: 设置IS_USE_LOCAL=True并配置EMBEDDINGS_PATH
+   - 可选的视觉功能: 配置VL_API_KEY和VL_BASE_URL
 
 ## API服务申请
 ### 获取视觉模型（如果不开启可以不用）
@@ -95,7 +180,6 @@ embeddings = SentenceTransformer(
     r"D:\Models_Home\Huggingface\hub\models--BAAI--bge-base-zh\snapshots\0e5f83d4895db7955e4cb9ed37ab73f7ded339b6"
     )
 ```
-
 
 ### 后端安装
 ```bash
@@ -149,7 +233,6 @@ python app.py
 6. 访问系统
 浏览器中打开 http://localhost:8000
 
-
 ## 目录结构
 - `app.py`: 主应用入口
 - `OmniText/`: 文本处理模块
@@ -168,7 +251,6 @@ python app.py
 - `output/`: 临时输出文件
 - `images/`: 图片资源
 
-
 ## 常见问题
 ### Q: 系统支持哪些类型的PDF文件？
 A: 系统支持大多数标准PDF文件，包括文本PDF和扫描PDF（需OCR）。
@@ -176,11 +258,22 @@ A: 系统支持大多数标准PDF文件，包括文本PDF和扫描PDF（需OCR�
 ### Q: 如何更新知识图谱？
 A: 重新上传文档或使用增量更新功能可更新知识图谱。
 
+### Q: 如何调整权重阈值？
+A: 在API调用时通过weight_threshold参数设置，或在前端界面通过相应控件调整。
+
+### Q: 权重值如何计算？
+A: 系统根据关系在文本中的重要性、出现频率和语境自动计算权重值，范围为0-1。
+
+### Q: 如何切换到不同的语言模型？
+A: 在.env文件中修改MODEL_NAME和相应的API_KEY、BASE_URL参数，系统会自动加载新的模型配置。
+
+### Q: 如何优化系统性能？
+A: 对于大型文档，可以调整SPLITTER_MODE为SemanticTextSplitter获得更好的分块效果；在GPU环境中将DEVICE设置为cuda可以显著提升嵌入计算速度。
+
 ## 待完成的功能
-- 问题生成（通过rag你好会自动生成）
-- 前端加入差异对比（展示没必要）
+- 问题生成（通过RAG已自动实现）
 - 对于实体可联网获取相关知识，如果当前知识图谱无法解决（待新增）
-- 文本分块进行rag的部分有问题（有些文本丢失）
+- 文本分块进行RAG的部分有问题（有些文本丢失）
 - 生成试卷进行学生的复习（允许联网生成易错选项）
 - 对上传的笔记可以进行检查功能，如有存在公理上的错误则提示用户进行修改
 - 增量更新没删除需要删除的块只新增块了（解决bid生成的问题）
@@ -188,7 +281,6 @@ A: 重新上传文档或使用增量更新功能可更新知识图谱。
 
 ## 可替换的技术栈
 * mineru 用于pdf转markdown，替换多模态2txt功能
-* 
 
 ## 许可证
 MIT
