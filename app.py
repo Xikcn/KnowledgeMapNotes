@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, AsyncGenerator
 from urllib.parse import quote
 from OmniStore.storeManager import storeManager
 from OmniText.PDFProcessor import PDFProcessor
+from OmniText.MDProcessor import MDProcessor
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import json
@@ -18,6 +19,7 @@ import uuid
 from collections import deque
 from dotenv import load_dotenv
 import os
+from TextSlicer.CharacterTextSplitter import CharacterTextSplitter
 
 load_dotenv(dotenv_path="./.env")
 
@@ -96,23 +98,30 @@ rag_agent = OpenaiAgent(client)
 kg_agent = OpenaiAgent(client)
 
 # 创建两个独立的splitter
-if os.getenv("SPLITTER_MODE") == "SemanticTextSplitter":
+simple_files = os.getenv("SIMPLE", "").split(",")
+semantic_files = os.getenv("SEMANTIC", "").split(",")
+character_files = os.getenv("CHARACTER", "").split(",")
+
+# 初始化默认分割器
+kg_splitter = None
+
+# 创建默认分割器
+if len(simple_files) > 0:
+    from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
+    kg_splitter = SimpleTextSplitter(2045, 1024)
+elif len(semantic_files) > 0:
     from TextSlicer.SemanticTextSplitter import SemanticTextSplitter
     kg_splitter = SemanticTextSplitter(2045, 1024)
-elif os.getenv("SPLITTER_MODE") == "SimpleTextSplitter":
-    from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
-    kg_splitter = SimpleTextSplitter(2045, 1024)
-else:
-    from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
-    kg_splitter = SimpleTextSplitter(2045, 1024)
-
-
+elif len(character_files) > 0:
+    from TextSlicer.CharacterTextSplitter import CharacterTextSplitter
+    kg_splitter = CharacterTextSplitter(separator="</end>", keep_separator=False, max_tokens=2045, min_tokens=1024)
 
 # 创建两个独立的kg_manager
 kg_manager = KgManager(agent=kg_agent, splitter=kg_splitter, embedding_model=embeddings, store=chromadb_store)
 
 FILE_PROCESSORS = {
     '.pdf': PDFProcessor,
+    '.md': MDProcessor,
     # 可扩展，不想写了。。。
 }
 # 添加CORS支持
@@ -556,6 +565,17 @@ def process_uploaded_file(original_path: str, filename: str, noteType: str = "ge
             text_content = f.read()
 
         logger.info(f"文件 {filename} 转换完成，开始处理知识图谱")
+
+        # 根据文件类型选择不同的文本分块器
+        if len(simple_files) > 0 and file_ext in simple_files:
+            from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
+            kg_manager.splitter = SimpleTextSplitter(2045, 1024)
+        elif len(semantic_files) > 0 and file_ext in semantic_files:
+            from TextSlicer.SemanticTextSplitter import SemanticTextSplitter
+            kg_manager.splitter = SemanticTextSplitter(2045, 1024)
+        elif len(character_files) > 0 and file_ext in character_files:
+            from TextSlicer.CharacterTextSplitter import CharacterTextSplitter
+            kg_manager.splitter = CharacterTextSplitter(separator="</end>", keep_separator=False, max_tokens=2045, min_tokens=1024)
 
         # 处理知识图谱
         process_knowledge_graph(base_name, text_content, filename, noteType)

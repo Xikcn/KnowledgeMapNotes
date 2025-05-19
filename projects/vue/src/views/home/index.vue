@@ -1095,6 +1095,7 @@ const fileTypeOptions = [
   { value: 'all', label: '全部' },
   { value: 'txt', label: 'TXT' },
   { value: 'pdf', label: 'PDF' },
+  { value: 'md', label: 'MD' },
   { value: 'docx', label: 'WORD' }
 ];
 
@@ -1568,7 +1569,7 @@ const onBeforeUpload = async (file) => {
               <div class="upload-text">
                 点击或拖拽上传文件
               </div>
-              <p>支持的文件类型：TXT，PDF...</p>
+              <p>支持的文件类型：TXT，PDF，MD(QA)...</p>
               <p>单个txt不超过 5M</p>
               <p>图谱初始构造时间较长，请耐心等待</p>
               <br>

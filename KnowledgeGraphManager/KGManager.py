@@ -94,10 +94,14 @@ class KgManager:
         prompt2 = open("./prompt/v2/relationship_extraction2.txt", encoding='utf-8').read()
         output2 = self.Agent.agent_safe_generate_response(
             prompt2, "笔记内容：" + input_parameter + "\n实体列表：" + json.dumps(entity))
-        
+
+        print(output2,'output2')
         # 确保从输出中获取正确的relations和weight值
-        relations = output2.get("relations", [])
-        
+        if isinstance(output2,int):
+            relations = []
+        else:
+            relations = output2.get("relations", [])
+
         # 确保权重是浮点数类型
         for relation in relations:
             if 'weight' not in relation:
@@ -105,7 +109,7 @@ class KgManager:
             else:
                 # 确保weight是浮点数类型
                 relation['weight'] = float(relation['weight'])
-                
+
         # print("原始关系权重:", [(rel['source'], rel['target'], rel['weight']) for rel in relations])
         return relations
 
@@ -113,7 +117,7 @@ class KgManager:
     def 知识融合(self,relations):
         # 创建一个字典来存储实体对及其关系
         entity_pairs = defaultdict(list)
-        
+
         # 收集所有具有相同实体的关系
         for relation in relations:
             for rel in relation['relation']:
@@ -125,7 +129,7 @@ class KgManager:
                     'bid': relation['bid'],
                     'relation': rel
                 })
-        
+
         # 处理需要融合的关系
         merged_relations = []
         for entity_pair, rel_list in entity_pairs.items():
@@ -141,7 +145,7 @@ class KgManager:
                     except (ValueError, TypeError):
                         weight = 0.5
                     input_text += f"- {rel['relation']['relation']}（上下文：{rel['relation']['context']}，权重：{weight}）\n"
-                
+
                 # 读取提示词模板
                 prompt = open("./prompt/v2/knowledge_fusion.txt", encoding='utf-8').read()
                 prompt = prompt.replace("{input_text}", input_text)
@@ -149,18 +153,21 @@ class KgManager:
                 # 使用Agent进行关系融合
                 merged_result = self.Agent.agent_safe_generate_response(prompt, input_text)
                 print(merged_result, "merged_result")
-                
+
                 # 确保融合后的关系中包含权重
-                for rel in merged_result.get('relations', []):
-                    if 'weight' not in rel:
-                        rel['weight'] = 0.5
-                    else:
-                        # 确保weight是浮点数
-                        try:
-                            rel['weight'] = float(rel['weight'])
-                        except (ValueError, TypeError):
+                if isinstance(merged_result, int):
+                    merged_result = []
+                else:
+                    for rel in merged_result.get('relations', []):
+                        if 'weight' not in rel:
                             rel['weight'] = 0.5
-                
+                        else:
+                            # 确保weight是浮点数
+                            try:
+                                rel['weight'] = float(rel['weight'])
+                            except (ValueError, TypeError):
+                                rel['weight'] = 0.5
+
                 # 将融合后的关系添加到结果中
                 for rel in rel_list:
                     merged_relations.append({
@@ -173,7 +180,7 @@ class KgManager:
                     'bid': rel_list[0]['bid'],
                     'relation': [rel_list[0]['relation']]  # 保持列表格式一致
                 })
-        
+
         # 确保返回的关系格式正确
         formatted_relations = []
         for relation in merged_relations:
@@ -192,14 +199,14 @@ class KgManager:
                         except (ValueError, TypeError):
                             print(f"警告: 无法将权重 '{rel['weight']}' 转换为浮点数，使用默认值0.5")
                             rel['weight'] = 0.5
-                    
+
                     formatted_relation['relation'].append(rel)
                     # print(f"添加关系: {rel['source']} -> {rel['target']}, 权重: {rel['weight']}")
                 else:
                     print(f"警告：跳过格式不正确的关系: {rel}")
             if formatted_relation['relation']:  # 只添加有效的关系
                 formatted_relations.append(formatted_relation)
-        
+
         return formatted_relations
 
     # 输入处理好的分割文本，输出bid与实体-关系三元集合
@@ -221,6 +228,7 @@ class KgManager:
             kg_triplet += [{"bid": bid, "relation": relation}]
         self.bidirectional_mapping = self._build_bidirectional_mapping(entity_labels)
         self.kg_triplet = kg_triplet
+        print(kg_triplet)
         return kg_triplet
 
 
@@ -240,7 +248,7 @@ class KgManager:
                 except (ValueError, TypeError):
                     print(f"警告: 无法转换权重值 '{rel.get('weight')}' 为浮点数，使用默认值0.5")
                     weight = 0.5
-                
+
                 # print(f"添加边 {source} -> {target} 权重: {weight}")
 
                 # 添加节点
@@ -344,7 +352,7 @@ class KgManager:
         # 使用pyvis可视化
         net = Network(notebook=True, height="750px", width="100%",
                       bgcolor="#ffffff", font_color="black", directed=True)
-        
+
         # 配置选项
         options = {
             "edges": {
@@ -385,11 +393,11 @@ class KgManager:
             }
         }
         net.set_options(json.dumps(options, indent=2))
-        
+
         # 手动添加节点和边，确保权重正确应用
         for node, attr in self.current_G.nodes(data=True):
             net.add_node(node, title=attr.get('title', ''), group=attr.get('group', ''))
-        
+
         # 添加所有边，确保权重被正确应用
         for source, target, attr in self.current_G.edges(data=True):
             weight = attr.get('weight', 0.5)
@@ -397,8 +405,8 @@ class KgManager:
             # 计算基于权重的宽度
             width = 1 + weight * 4
             net.add_edge(
-                source=source, 
-                to=target, 
+                source=source,
+                to=target,
                 title=attr.get('title', ''),
                 label=attr.get('label', ''),
                 weight=weight,

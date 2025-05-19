@@ -21,6 +21,7 @@ class OpenaiAgent:
         for i in range(repeat):
             try:
                 curr_gpt_response = self.agent_request(prompt, input_parameter)
+                # print(curr_gpt_response,"curr_gpt_response")
                 x = ""
                 if 'json' in curr_gpt_response:
                     pattern = r"```json\s*({.*?})\s*```"
@@ -31,7 +32,6 @@ class OpenaiAgent:
                     else:
                         print("未找到匹配的 JSON 内容")
                         continue
-
                 return x
             except:
                 print("ERROR")
@@ -47,6 +47,7 @@ class OpenaiAgent:
             temperature=temperature
         )
         output = response.choices[0].message.content
+        # print(output,"output")
         return output
 
     def agent_safe_generate_response_rag(self, prompt, input_parameter, messages, stream, repeat=3):
@@ -219,5 +220,3 @@ class OpenaiAgent:
             answer = text[:material_match.start()].strip()
             return answer, material
         return text, ""
-
-
