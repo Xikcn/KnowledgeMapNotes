@@ -19,7 +19,6 @@ import uuid
 from collections import deque
 from dotenv import load_dotenv
 import os
-from TextSlicer.CharacterTextSplitter import CharacterTextSplitter
 
 load_dotenv(dotenv_path="./.env")
 
