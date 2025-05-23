@@ -95,7 +95,7 @@ class KgManager:
         output2 = self.Agent.agent_safe_generate_response(
             prompt2, "笔记内容：" + input_parameter + "\n实体列表：" + json.dumps(entity))
 
-        print(output2,'output2')
+        # print(output2,'output2')
         # 确保从输出中获取正确的relations和weight值
         if isinstance(output2,int):
             relations = []
