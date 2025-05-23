@@ -3,6 +3,7 @@ import re
 from collections import defaultdict
 from pyvis.network import Network
 import networkx as nx
+import concurrent.futures
 
 
 class KgManager:
@@ -210,22 +211,37 @@ class KgManager:
         return formatted_relations
 
     # 输入处理好的分割文本，输出bid与实体-关系三元集合
-    def 知识图谱的构建(self,text=None):
+    def 知识图谱的构建(self, text=None):
         if type(text) == str:
             self.Bolts = self._Txt2Bolts(text)
         elif type(text) == list:
             self.Bolts = text
         elif text is None:
-           pass
+            pass
         kg_triplet = []
         entity_labels = []
-        for bid, Bolt in self.Bolts:
-            entity_label = self.实体提取(Bolt)
-            # 修复BUG，应为entity和label同时传入模型导致认为标签也是实体名而非实体类型
-            entity = [i[0] for i in entity_label]
-            relation = self.关系提取(Bolt,entity)
-            entity_labels+=entity_label
-            kg_triplet += [{"bid": bid, "relation": relation}]
+        num_blocks = len(self.Bolts)
+        # 用于存储每个块的实体识别结果
+        entity_futures = [None] * num_blocks
+        relation_futures = [None] * num_blocks
+        results = [None] * num_blocks
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            # 1. 先提交第一个块的实体提取
+            entity_futures[0] = executor.submit(self.实体提取, self.Bolts[0][1])
+            for i in range(num_blocks):
+                # 等待当前块实体提取完成
+                entity_label = entity_futures[i].result()
+                entity_labels += entity_label
+                entity = [e[0] for e in entity_label]
+                # 立即提交当前块的关系提取
+                relation_futures[i] = executor.submit(self.关系提取, self.Bolts[i][1], entity)
+                # 如果还有下一个块，提前提交下一个块的实体提取
+                if i + 1 < num_blocks:
+                    entity_futures[i + 1] = executor.submit(self.实体提取, self.Bolts[i + 1][1])
+                # 等待当前块关系提取完成
+                relation = relation_futures[i].result()
+                results[i] = {"bid": self.Bolts[i][0], "relation": relation}
+        kg_triplet = results
         self.bidirectional_mapping = self._build_bidirectional_mapping(entity_labels)
         self.kg_triplet = kg_triplet
         print(kg_triplet)

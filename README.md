@@ -15,6 +15,7 @@ https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 - **基于权重的关系筛选与社区发现**（支持阈值与TopN筛选）
 - **增量更新与知识库管理**
 - **API接口丰富，参数灵活可控**
+- **多线程实体识别，关系抽取，高性能快速完成图谱构建**
 
 ## 技术架构
 - **后端**：FastAPI、ChromaDB、SentenceTransformers、NetworkX、OpenAI/百炼大模型
