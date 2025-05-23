@@ -135,7 +135,7 @@ class  storeManager:
         
         # 按权重降序排序
         edges_with_weight.sort(key=lambda x: x['weight'], reverse=True)
-        print(edges_with_weight, "test")
+        # print(edges_with_weight, "test")
         # 如果指定了top_n，则只取前top_n个关系
         if top_n > 0:
             edges_with_weight = edges_with_weight[:top_n]

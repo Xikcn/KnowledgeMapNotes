@@ -271,6 +271,11 @@ A: 对于大型文档，可以调整SPLITTER_MODE为SemanticTextSplitter获得�
 ## 可替换的技术栈
 * mineru 用于pdf转markdown，替换多模态2txt功能
 
+## 外部额外功能整合
+- **支持qa类型笔记，配合qa笔记工具与对于MCP服务即可使用ai完成知识的整理**
+- **详细可见：https://github.com/Xikcn/QAlite**
+![img.png](readme_img/img.png)
+
 ## 许可证
 MIT
 
