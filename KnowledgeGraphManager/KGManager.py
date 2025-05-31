@@ -1,10 +1,14 @@
 import json
+import os
 import re
 from collections import defaultdict
+from dotenv import load_dotenv
 from pyvis.network import Network
 import networkx as nx
 import concurrent.futures
 
+load_dotenv(dotenv_path="./.env")
+prompt_vision = os.getenv("PROMPTVISION")
 
 class KgManager:
     def __init__(self,agent,splitter,embedding_model,store):
@@ -85,14 +89,14 @@ class KgManager:
 
     def 实体提取(self,input_parameter):
         entity_label = []
-        prompt = open("./prompt/v2/entity_extraction2.txt", encoding='utf-8').read()
+        prompt = open(f"./prompt/{prompt_vision}/entity_extraction2.txt", encoding='utf-8').read()
         output = self.Agent.agent_safe_generate_response(prompt, input_parameter)
         entity_label += output["entities"]
             # print(output)
         return entity_label
 
     def 关系提取(self,input_parameter,entity):
-        prompt2 = open("./prompt/v2/relationship_extraction2.txt", encoding='utf-8').read()
+        prompt2 = open(f"./prompt/{prompt_vision}/relationship_extraction2.txt", encoding='utf-8').read()
         output2 = self.Agent.agent_safe_generate_response(
             prompt2, "笔记内容：" + input_parameter + "\n实体列表：" + json.dumps(entity))
 
@@ -148,12 +152,12 @@ class KgManager:
                     input_text += f"- {rel['relation']['relation']}（上下文：{rel['relation']['context']}，权重：{weight}）\n"
 
                 # 读取提示词模板
-                prompt = open("./prompt/v2/knowledge_fusion.txt", encoding='utf-8').read()
+                prompt = open(f"./prompt/{prompt_vision}/knowledge_fusion.txt", encoding='utf-8').read()
                 prompt = prompt.replace("{input_text}", input_text)
                 # print(input_text,"input_text")
                 # 使用Agent进行关系融合
                 merged_result = self.Agent.agent_safe_generate_response(prompt, input_text)
-                print(merged_result, "merged_result")
+                print(merged_result, "关系融合")
 
                 # 确保融合后的关系中包含权重
                 if isinstance(merged_result, int):
@@ -244,7 +248,7 @@ class KgManager:
         kg_triplet = results
         self.bidirectional_mapping = self._build_bidirectional_mapping(entity_labels)
         self.kg_triplet = kg_triplet
-        print(kg_triplet)
+        # print(kg_triplet)
         return kg_triplet
 
 
@@ -355,7 +359,7 @@ class KgManager:
         # 新增的块
         for bid, text in added_blocks:
             add_data.append((bid, text))
-
+        print(f"增量更新：\n 新增的块：{add_data},\n  被删除的块：{bids_to_remove}")
         self.kg_triplet = self.知识图谱的构建(add_data)
         new_kg_triplet = self.kg_triplet + filtered_data
 
@@ -772,7 +776,7 @@ class KgManager:
 
     # 获取提问的实体（存在与知识图谱的）
     def text2entity(self, text):
-        prompt = open("./prompt/v2/entity_q2merge.txt", encoding='utf-8').read()
+        prompt = open(f"./prompt/{prompt_vision}/entity_q2merge.txt", encoding='utf-8').read()
         entity = [str(i) for i in self.current_G]
         input_parameter = f"实体列表：{entity}\n问题：{text}"
         output = self.Agent.agent_safe_generate_response(prompt, input_parameter)

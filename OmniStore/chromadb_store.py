@@ -14,7 +14,7 @@ load_dotenv()  #
 device = os.getenv("DEVICE")
 
 class StoreTool:
-    def __init__(self, storage_path="./chroma_data", embedding_function=None):
+    def __init__(self, storage_path=os.getenv("CHROMADB_PATH"), embedding_function=None):
         # 初始化chromadb客户端
         self.client = chromadb.PersistentClient(path=storage_path)
 
@@ -42,7 +42,7 @@ class StoreTool:
         self.rerank_model = rerank_model
 
 
-        # 获取或创建集合
+        # 获取图谱的三元组或创建集合
         self.collection = self.client.get_or_create_collection(
             name="kg_states",
             embedding_function=self.embedding_func

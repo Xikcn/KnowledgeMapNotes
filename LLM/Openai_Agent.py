@@ -7,7 +7,7 @@ import os
 load_dotenv()  # 默认会加载根目录下的.env文件
 model = os.getenv("MODEL_NAME")
 temperature  =  float(os.getenv("TEMPERATURE"))
-
+prompt_vision = os.getenv("PROMPTVISION")
 class OpenaiAgent:
     def __init__(self, client):
         # 大模型
@@ -160,8 +160,8 @@ class OpenaiAgent:
         return output
 
     def hybrid_rag(self, query, graph, vectors, messages, stream=False):
-        prompt = open("./prompt/v2/rag_v1_hybrid.txt", encoding='utf-8').read()
-        input_parameter = open("./prompt/v2/rag_v1_query_hy.txt", encoding='utf-8').read()
+        prompt = open(f"./prompt/{prompt_vision}/rag_v1_hybrid.txt", encoding='utf-8').read()
+        input_parameter = open(f"./prompt/{prompt_vision}/rag_v1_query_hy.txt", encoding='utf-8').read()
         graph_relation = "\n".join(graph)
         context = "\n".join(vectors)
         input_parameter = input_parameter.replace("{{query}}", query)
@@ -183,8 +183,8 @@ class OpenaiAgent:
         参数与hybrid_rag保持一致，但直接返回流对象以供迭代
         """
         # 构建提示和输入参数
-        prompt = open("./prompt/v2/rag_v1_hybrid.txt", encoding='utf-8').read()
-        input_parameter = open("./prompt/v2/rag_v1_query_hy.txt", encoding='utf-8').read()
+        prompt = open(f"./prompt/{prompt_vision}/rag_v1_hybrid.txt", encoding='utf-8').read()
+        input_parameter = open(f"./prompt/{prompt_vision}/rag_v1_query_hy.txt", encoding='utf-8').read()
         graph_relation = "\n".join(graph)
         context = "\n".join(vectors)
         input_parameter = input_parameter.replace("{{query}}", query)

@@ -158,7 +158,7 @@ onMounted(async () => {
     // 加载图片文本识别设置
     const savedImg2txtSetting = localStorage.getItem('use-img2txt');
     useImg2txt.value = savedImg2txtSetting === 'true';
-    
+
     const response = await axios.get('http://localhost:8000/list-files');
     if (response.data && Array.isArray(response.data.files)) {
       // 将历史文件添加到文件列表，保持原始文件名和状态
@@ -212,7 +212,7 @@ const deleteFile = async (file) => {
     if (index !== -1) {
       uploadFileList.value.splice(index, 1);
     }
-    
+
     // 如果删除的是当前查看的文件，先清空当前状态再清理缓存
     if (currentFile.value && currentFile.value.name === file.name) {
       // 先清空当前文件状态
@@ -246,7 +246,7 @@ const deleteFile = async (file) => {
 const deleteRagHistory = async (event, file) => {
   // 阻止事件冒泡，防止触发文件查看
   event.stopPropagation();
-  
+
   try {
     // 添加确认弹窗
     await ElMessageBox.confirm(
@@ -261,7 +261,7 @@ const deleteRagHistory = async (event, file) => {
 
     // 调用后端API删除RAG历史
     await axios.delete(`http://localhost:8000/rag-history/${file.name}`);
-    
+
     // 清理本地缓存
     localStorage.removeItem(`chat_${file.name}`);  // 删除本地聊天记录
 
@@ -368,10 +368,10 @@ const processStreamResponse = async (url, data, messageIndex) => {
               // 检查响应内容是否为JSON格式
               let finalAnswer = eventData.answer;
               let finalMaterial = eventData.material;
-              
+
               // 使用正则表达式匹配```json和```之间的内容
               const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-              
+
               if (typeof finalAnswer === 'string') {
                 const jsonMatch = finalAnswer.match(jsonRegex);
                 if (jsonMatch && jsonMatch[1]) {
@@ -385,7 +385,7 @@ const processStreamResponse = async (url, data, messageIndex) => {
                         finalAnswer = jsonContent.answer;
                       }
                     }
-                    
+
                     // 检查material是否存在且非空
                     if (jsonContent.material) {
                       if (Array.isArray(jsonContent.material) && jsonContent.material.length > 0) {
@@ -412,7 +412,7 @@ const processStreamResponse = async (url, data, messageIndex) => {
                         finalAnswer = jsonContent.answer;
                       }
                     }
-                    
+
                     if (jsonContent.material) {
                       if (Array.isArray(jsonContent.material) && jsonContent.material.length > 0) {
                         finalMaterial = jsonContent.material.join('\n');
@@ -429,7 +429,7 @@ const processStreamResponse = async (url, data, messageIndex) => {
                   }
                 }
               }
-              
+
               // 更新聊天消息
               chatMessages.value[messageIndex].content.answer = finalAnswer;
               if (finalMaterial && finalMaterial.trim() !== '') {
@@ -675,20 +675,20 @@ const closeFileList = () => {
 const beforeUpload = async (file) => {
   // 检查文件是否已存在
   const existingFile = uploadFileList.value.find(item => item.name === file.name);
-  
+
   if (existingFile) {
     // 询问用户是否要覆盖已存在的文件
     try {
       await ElMessageBox.confirm(
-        `文件 "${file.name}" 已存在，是否要进行增量更新？`,
-        '文件已存在',
-        {
-          confirmButtonText: '增量更新',
-          cancelButtonText: '取消上传',
-          type: 'warning',
-        }
+          `文件 "${file.name}" 已存在，是否要进行增量更新？`,
+          '文件已存在',
+          {
+            confirmButtonText: '增量更新',
+            cancelButtonText: '取消上传',
+            type: 'warning',
+          }
       );
-      
+
       // 用户确认更新，修改原文件状态为更新中
       existingFile.status = 'updating';
       existingFile.display_status = '增量更新中';
@@ -700,7 +700,7 @@ const beforeUpload = async (file) => {
       return false;
     }
   }
-  
+
   // 新文件，正常上传
   const fileObj = {
     uid: Date.now(),
@@ -802,12 +802,12 @@ const updateFileStatus = async (file) => {
       } else {
         file.display_status = getStatusText(response.data.status);
       }
-      
+
       // 如果文件存在增量更新标记并且状态已变为completed，清除更新标记
       if (file.isUpdate && response.data.status === 'completed') {
         file.isUpdate = false;
       }
-      
+
       return true;
     }
     return false;
@@ -891,10 +891,10 @@ const viewFileResult = async (file) => {
 
       // 启用自动滚动
       autoScroll.value = true;
-      
+
       // 不管当前是什么标签，先切换到RAG标签
       activeTab.value = 'rag';
-      
+
       // 使用nextTick确保DOM已更新
       nextTick(() => {
         scrollToBottom();
@@ -907,15 +907,15 @@ const viewFileResult = async (file) => {
     // 处理错误状态的文件，提示用户是否重新构建
     try {
       await ElMessageBox.confirm(
-        `文件 ${file.name} 处理失败，是否重新开始构建知识图谱？`,
-        '重新构建',
-        {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning',
-        }
+          `文件 ${file.name} 处理失败，是否重新开始构建知识图谱？`,
+          '重新构建',
+          {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning',
+          }
       );
-      
+
       // 重新上传文件
       rebuildKnowledgeGraph(file);
     } catch (error) {
@@ -939,7 +939,7 @@ const rebuildKnowledgeGraph = async (file) => {
       targetFile.display_status = '重新上传中';
       targetFile.percentage = 0;
     }
-    
+
     // 使用新的rebuild API端点
     const formData = new FormData();
     formData.append('filename', file.name);
@@ -947,17 +947,17 @@ const rebuildKnowledgeGraph = async (file) => {
     // 显式使用字符串值
     const img2txtValue = useImg2txt.value ? 'true' : 'false';
     formData.append('use_img2txt', img2txtValue);
-    
-    console.log('重建使用的参数:', {
-      filename: file.name,
-      noteType: noteType.value, 
-      use_img2txt: img2txtValue,
-      useImg2txt原始值: useImg2txt.value
-    });
-    
+
+    // console.log('重建使用的参数:', {
+    //   filename: file.name,
+    //   noteType: noteType.value,
+    //   use_img2txt: img2txtValue,
+    //   useImg2txt原始值: useImg2txt.value
+    // });
+
     // 发送重新构建请求
     const response = await axios.post('http://localhost:8000/rebuild', formData);
-    
+
     // 处理响应
     if (response.data) {
       if (targetFile) {
@@ -965,16 +965,16 @@ const rebuildKnowledgeGraph = async (file) => {
         targetFile.display_status = '处理中';
         targetFile.percentage = 100;
       }
-      
+
       // 开始检查处理状态
       checkFileProcessingStatus(targetFile);
-      
+
       ElMessage.success(`文件 ${file.name} 重新构建已开始`);
     }
   } catch (error) {
     console.error('重新构建失败:', error);
     ElMessage.error(`重新构建失败: ${error.message || '未知错误'}`);
-    
+
     // 恢复文件状态为错误
     const targetFile = uploadFileList.value.find(item => item.name === file.name);
     if (targetFile) {
@@ -1216,11 +1216,11 @@ const viewFile = async (file) => {
 const prepareChatState = (file) => {
   // 首先尝试从localStorage加载聊天记录
   const savedChat = localStorage.getItem(`chat_${file.name}`);
-  
+
   if (savedChat) {
     // 如果localStorage中有聊天记录，使用它
     chatMessages.value = JSON.parse(savedChat);
-    
+
     // 同时更新fileChatStates中的记录
     if (!fileChatStates.value[file.name]) {
       fileChatStates.value[file.name] = {
@@ -1241,7 +1241,7 @@ const prepareChatState = (file) => {
         ],
         lastActive: new Date().getTime()
       };
-      
+
       // 更新聊天消息
       chatMessages.value = [...fileChatStates.value[file.name].messages];
     } else {
@@ -1302,7 +1302,7 @@ const onUploadClick = () => {
   const formData = new FormData();
   formData.append('file', uploadRef.value.files[0]);
   formData.append('noteType', noteType.value);
-  
+
   axios.post('/api/upload', formData, {
     onUploadProgress: (e) => {
       onUploadProgress(e, uploadRef.value.files[0]);
@@ -1314,8 +1314,6 @@ const onUploadClick = () => {
   });
 }
 
-// 修改onUploadSuccess函数，处理noteType参数
-// ... existing code ...
 
 // 修改onBeforeUpload函数，添加调试信息
 const onBeforeUpload = async (file) => {
@@ -1324,36 +1322,36 @@ const onBeforeUpload = async (file) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('noteType', noteType.value);
-    
+
     // 使用open/off字符串表示开关状态
     const img2txtValue = useImg2txt.value ? 'open' : 'off';
     formData.append('use_img2txt', img2txtValue);
-    
+
     console.log('上传参数:', {
       file: file.name,
       noteType: noteType.value,
       use_img2txt: img2txtValue
     });
 
-    // 在上传前先检查文件是否已经存在，如果存在则执行更新操作
-    const existingFile = uploadFileList.value.find(item => item.name === file.name);
-    
-    // 开始上传过程
-    const response = await axios.post('http://localhost:8000/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
-      onUploadProgress: (progressEvent) => {
-        // 计算上传进度
-        const percentage = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-        
-        // 更新上传进度
-        const uploadingFile = uploadFileList.value.find(item => item.name === file.name);
-        if (uploadingFile) {
-          uploadingFile.percentage = percentage;
-        }
-      }
-    });
+    // // 在上传前先检查文件是否已经存在，如果存在则执行更新操作
+    // const existingFile = uploadFileList.value.find(item => item.name === file.name);
+    //
+    // // 开始上传过程
+    // const response = await axios.post('http://localhost:8000/upload', formData, {
+    //   headers: {
+    //     'Content-Type': 'multipart/form-data'
+    //   },
+    //   onUploadProgress: (progressEvent) => {
+    //     // 计算上传进度
+    //     const percentage = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+    //
+    //     // 更新上传进度
+    //     const uploadingFile = uploadFileList.value.find(item => item.name === file.name);
+    //     if (uploadingFile) {
+    //       uploadingFile.percentage = percentage;
+    //     }
+    //   }
+    // });
   } catch (error) {
     console.error('上传文件失败:', error);
     ElMessage.error('上传文件失败');
@@ -1375,6 +1373,7 @@ const onBeforeUpload = async (file) => {
         @closeAll="handleCloseAll"
     />
     <div class="main-content">
+      <!--  抽屉型文件列表   -->
       <el-drawer v-model="fileListExpand" direction="ltr" :modal="false" :show-close="false" :size="280">
         <template #header>
           <div class="drawer-manu-header">
@@ -1387,6 +1386,7 @@ const onBeforeUpload = async (file) => {
         </template>
         <template #default>
           <div v-if="!isSearch" class="query-button">
+            <!--  文件列表筛选框  -->
             <el-popover
                 v-model:visible="filterVisible"
                 :show-arrow="false"
@@ -1433,6 +1433,7 @@ const onBeforeUpload = async (file) => {
             </el-popover>
             <svg-icon icon-name="search" icon-class="search-icon" size="18px" @click="isSearch=true"/>
           </div>
+          <!--  文件搜索过滤  -->
           <div v-else class="search-input">
             <el-input
                 v-model="searchValue"
@@ -1442,6 +1443,7 @@ const onBeforeUpload = async (file) => {
             />
             <el-button link @click="isSearch=false">取消</el-button>
           </div>
+          <!--  文件列表  -->
           <div class="file-list">
             <template v-if="filteredFileList.length > 0">
               <div
@@ -1454,7 +1456,7 @@ const onBeforeUpload = async (file) => {
                   'expanded': sideBarRef?.expandedFileId === file.name
                 }"
               >
-                <div class="file-header" 
+                <div class="file-header"
                      @dblclick="viewFileResult(file)"
                      @click="sideBarRef?.toggleFileExpand(file)"
                      @mouseenter="currentFileId = file.name"
@@ -1464,6 +1466,7 @@ const onBeforeUpload = async (file) => {
                       <component :is="getFileIcon(file.status)" />
                     </el-icon>
                     <div class="file-name-container">
+                      <!-- 文件名提示 -->
                       <el-tooltip
                           :content="file.name"
                           placement="right"
@@ -1472,15 +1475,18 @@ const onBeforeUpload = async (file) => {
                       >
                         <div class="file-name">{{ file.name }}</div>
                       </el-tooltip>
+                      <!-- 进度条 -->
                       <div v-if="file.status === 'uploading'" class="file-progress">
                         <el-progress :percentage="file.percentage" :show-text="false" :stroke-width="2" />
                       </div>
                     </div>
                   </div>
+                  <!-- 文件列表操作（删除） -->
                   <div class="file-actions">
                     <div class="file-status" :class="file.status">
                       {{ file.display_status || getStatusText(file.status) }}
                     </div>
+                    <!-- 过渡动画 -->
                     <transition name="fade">
                       <div v-if="currentFileId === file.name && file.status === 'completed'" class="delete-action">
                         <el-tooltip content="清除RAG历史" placement="top">
@@ -1503,7 +1509,7 @@ const onBeforeUpload = async (file) => {
                     </transition>
                   </div>
                 </div>
-                
+
                 <!-- 展开的实体卡片 -->
                 <div v-if="sideBarRef?.expandedFileId === file.name" class="file-entities-card">
                   <div v-if="sideBarRef?.loadingEntities[file.name]" class="loading-entities">
@@ -1512,22 +1518,22 @@ const onBeforeUpload = async (file) => {
                   </div>
                   <div v-else-if="sideBarRef?.fileEntities[file.name]?.errorMessage" class="entities-error">
                     <el-alert
-                      :title="sideBarRef?.fileEntities[file.name]?.errorMessage"
-                      type="error"
-                      :closable="false"
-                      size="small"
-                      show-icon
+                        :title="sideBarRef?.fileEntities[file.name]?.errorMessage"
+                        type="error"
+                        :closable="false"
+                        size="small"
+                        show-icon
                     />
                   </div>
                   <div v-else-if="sideBarRef?.fileEntities[file.name]?.entities?.length" class="entities-list">
                     <div class="entities-title">主要实体</div>
                     <div class="entities-content">
                       <el-tag
-                        v-for="entity in sideBarRef?.fileEntities[file.name].entities"
-                        :key="entity"
-                        class="entity-tag"
-                        size="small"
-                        effect="plain"
+                          v-for="entity in sideBarRef?.fileEntities[file.name].entities"
+                          :key="entity"
+                          class="entity-tag"
+                          size="small"
+                          effect="plain"
                       >
                         {{ entity }}
                       </el-tag>
@@ -1541,11 +1547,13 @@ const onBeforeUpload = async (file) => {
             </template>
             <el-empty v-else description="暂无文件" />
           </div>
+          <!-- 文件列表分页 -->
           <div class="pagination" v-if="filteredFileList.length > 0">
             <el-pagination :total="filteredFileList.length" size="small" layout="prev, pager, next" background />
           </div>
         </template>
       </el-drawer>
+
       <div class="content" :style="{marginLeft:fileListExpand?'280px':'auto'}">
         <div v-if="activeView === 'upload'" class="upload-view">
           <div class="background"></div>
@@ -1570,7 +1578,7 @@ const onBeforeUpload = async (file) => {
                 点击或拖拽上传文件
               </div>
               <p>支持的文件类型：TXT，PDF，MD(QA)...</p>
-              <p>单个txt不超过 5M</p>
+              <p>单个txt不超过 2M</p>
               <p>图谱初始构造时间较长，请耐心等待</p>
               <br>
               <br>
@@ -1579,6 +1587,7 @@ const onBeforeUpload = async (file) => {
           </div>
         </div>
 
+        <!-- 文件处理结果内容展示3tab -->
         <div v-if="activeView === 'result'" class="result-view">
           <!-- 顶部导航标签 -->
           <div class="file-tabs">
@@ -1736,7 +1745,7 @@ const onBeforeUpload = async (file) => {
                       </div>
                     </div>
                   </div>
-
+                  <!--  一键到底  -->
                   <div
                       v-if="showScrollButton"
                       class="scroll-to-bottom-btn"
@@ -1773,6 +1782,7 @@ const onBeforeUpload = async (file) => {
           </div>
         </div>
 
+        <!-- 主题设置 -->
         <el-popover :show-arrow="false" placement="top-end" popper-class="custom-popover" trigger="hover"
                     :show-after="200" popper-style="width:310px">
           <template #reference>
@@ -1940,7 +1950,7 @@ const onBeforeUpload = async (file) => {
             transition: all 0.3s ease;
             border-radius: 8px;
             border: 1px solid transparent;
-            
+
             &.expanded {
               background-color: var(--el-fill-color-light);
             }
@@ -1967,7 +1977,7 @@ const onBeforeUpload = async (file) => {
                 border-color: var(--el-color-primary-light-3);
               }
             }
-            
+
             .file-header {
               display: flex;
               align-items: center;
@@ -1975,7 +1985,7 @@ const onBeforeUpload = async (file) => {
               padding: 12px 16px;
               cursor: pointer;
               transition: background-color 0.3s;
-              
+
               .file-actions {
                 display: flex;
                 align-items: center;
@@ -1985,7 +1995,7 @@ const onBeforeUpload = async (file) => {
                   display: flex;
                   align-items: center;
                   gap: 8px;
-                  
+
                   .delete-icon, .clear-icon {
                     cursor: pointer;
                     width: 16px;
@@ -1999,11 +2009,11 @@ const onBeforeUpload = async (file) => {
                       opacity: 1;
                     }
                   }
-                  
+
                   .delete-icon:hover {
                     background-color: var(--el-color-danger-light-9);
                   }
-                  
+
                   .clear-icon:hover {
                     background-color: var(--el-color-warning-light-9);
                   }
@@ -2040,7 +2050,7 @@ const onBeforeUpload = async (file) => {
                   flex: 1;
                   min-width: 0; // 防止子元素溢出
                   user-select: none; /* 禁止文本选择 */
-                  
+
                   .file-name {
                     white-space: nowrap;
                     overflow: hidden;
@@ -2063,7 +2073,7 @@ const onBeforeUpload = async (file) => {
                 white-space: nowrap;
                 flex-shrink: 0;
                 user-select: none; /* 禁止文本选择 */
-                
+
                 &.uploading, &.processing {
                   color: var(--el-color-primary);
                 }
@@ -2077,7 +2087,7 @@ const onBeforeUpload = async (file) => {
                 }
               }
             }
-            
+
             .file-entities-card {
               padding: 12px 16px;
               border-top: 1px dashed var(--el-border-color-light);
@@ -2085,24 +2095,24 @@ const onBeforeUpload = async (file) => {
               user-select: none; /* 禁止文本选择 */
               overflow: hidden;
               transition: max-height 0.3s ease-in-out;
-              
+
               .loading-entities {
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 padding: 12px 0;
                 color: var(--el-text-color-secondary);
-                
+
                 .el-icon {
                   margin-right: 8px;
                   font-size: 18px;
                 }
               }
-              
+
               .entities-error {
                 padding: 8px 0;
               }
-              
+
               .entities-title {
                 font-size: 14px;
                 font-weight: 600;
@@ -2110,20 +2120,20 @@ const onBeforeUpload = async (file) => {
                 color: var(--el-text-color-primary);
                 user-select: none; /* 禁止文本选择 */
               }
-              
+
               .entities-content {
                 display: flex;
                 flex-wrap: wrap;
                 gap: 8px;
                 user-select: none; /* 禁止文本选择 */
-                
+
                 .entity-tag {
                   margin-right: 0;
                   cursor: default;
                   user-select: none; /* 禁止文本选择 */
                 }
               }
-              
+
               .no-entities {
                 padding: 8px 0;
               }

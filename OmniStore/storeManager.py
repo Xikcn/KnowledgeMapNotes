@@ -1,6 +1,10 @@
+import os
 import random
 from community import community_louvain
+from dotenv import load_dotenv
 
+load_dotenv()  # 默认会加载根目录下的.env文件
+prompt_vision = os.getenv("PROMPTVISION")
 
 class  storeManager:
     def __init__(self,store,agent):
@@ -57,7 +61,7 @@ class  storeManager:
             print(f"无法获取知识图谱数据: {file}")
             return []
 
-        prompt = open("./prompt/v2/entity_q2merge.txt", encoding='utf-8').read()
+        prompt = open(f"./prompt/{prompt_vision}/entity_q2merge.txt", encoding='utf-8').read()
         entity = [str(i) for i in current_g]
         input_parameter = f"实体列表：{entity}\n问题：{query}"
         output = self.agent.agent_safe_generate_response(prompt, input_parameter)

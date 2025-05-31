@@ -10,16 +10,15 @@ https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 ## 主要功能
 - **PDF/MD文档自动处理与知识抽取**
 - **知识图谱自动构建与融合**（支持多关系融合、权重计算）
-- **智能问答（RAG/HybridRAG）**，支持上下文与知识图谱结合
+- **智能问答（HybridRAG）**，支持上下文与知识图谱结合
 - **知识图谱可视化**（实体/关系搜索、高亮、权重粗细展示）
 - **基于权重的关系筛选与社区发现**（支持阈值与TopN筛选）
 - **增量更新与知识库管理**
 - **API接口丰富，参数灵活可控**
-- **多线程实体识别，关系抽取，高性能快速完成图谱构建**
 
 ## 技术架构
 - **后端**：FastAPI、ChromaDB、SentenceTransformers、NetworkX、OpenAI/百炼大模型
-- **前端**：Vue3、Element Plus、ECharts
+- **前端**：Vue3、Element Plus
 - **其他**：多线程/异步处理、环境变量灵活配置
 
 ## 系统架构
@@ -126,10 +125,8 @@ SPLITTER_MODE=SimpleTextSplitter
 1. 创建并配置`.env`文件
 ```bash
 # 复制配置模板（如果存在）或手动创建
-# cp .env.example .env
-touch .env
-# 使用文本编辑器填写必要的配置参数
-nano .env
+cp .env.example .env
+
 ```
 
 2. 关键配置说明
@@ -265,8 +262,8 @@ A: 对于大型文档，可以调整SPLITTER_MODE为SemanticTextSplitter获得�
 
 ## 即将完善的功能
 - 采用更优秀的社区搜索方式
-- 将实体识别和关系抽取进行多线程处理提高构建效率
-- 对不同笔记类型如：故事类和知识类的构建重点区分
+- 隐私数据进行脱敏与还原，保证用户隐私安全
+- 文本处理构建的进度显示，就是处理分块的数量/总数
 
 ## 可替换的技术栈
 * mineru 用于pdf转markdown，替换多模态2txt功能

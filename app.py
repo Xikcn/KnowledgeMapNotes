@@ -46,7 +46,7 @@ class rag_item(BaseModel):
     session_id: Optional[str] = None  # 会话ID，用于跟踪特定文件的对话
 
 
-app = FastAPI(title="文件处理服务", description="支持文件上传和异步处理")
+app = FastAPI(title="图谱笔记", description="大模型知识图谱笔记软件")
 
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER")
 TXT_FOLDER = os.getenv("TXT_FOLDER")
@@ -107,13 +107,13 @@ kg_splitter = None
 # 创建默认分割器
 if len(simple_files) > 0:
     from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
-    kg_splitter = SimpleTextSplitter(2045, 1024)
+    kg_splitter = SimpleTextSplitter(2048, 1024)
 elif len(semantic_files) > 0:
     from TextSlicer.SemanticTextSplitter import SemanticTextSplitter
-    kg_splitter = SemanticTextSplitter(2045, 1024)
+    kg_splitter = SemanticTextSplitter(2048, 1024)
 elif len(character_files) > 0:
     from TextSlicer.CharacterTextSplitter import CharacterTextSplitter
-    kg_splitter = CharacterTextSplitter(separator="</end>", keep_separator=False, max_tokens=2045, min_tokens=1024)
+    kg_splitter = CharacterTextSplitter(separator="</end>", keep_separator=False, max_tokens=2048, min_tokens=1024)
 
 # 创建两个独立的kg_manager
 kg_manager = KgManager(agent=kg_agent, splitter=kg_splitter, embedding_model=embeddings, store=chromadb_store)
@@ -152,7 +152,21 @@ session_responses = {}
 
 @app.post("/create_session")
 async def create_session():
-    """创建新的会话ID"""
+    """
+    创建新的会话ID。
+    
+    用途：
+        用于前端或客户端创建一个新的对话会话，后续RAG问答等操作可复用该session_id。
+    
+    参数：
+        无
+    
+    返回：
+        dict: {"session_id": str} 新生成的会话ID。
+    
+    异常：
+        无
+    """
     session_id = str(uuid.uuid4())
     message_queues[session_id] = deque()
     session_events[session_id] = asyncio.Event()
@@ -162,7 +176,21 @@ async def create_session():
 
 @app.post("/hybridrag")
 async def hybridrag(item: rag_item):
-    """处理混合RAG请求"""
+    """
+    处理混合RAG请求。
+    
+    用途：
+        结合知识图谱和RAG检索，生成问答结果。
+    
+    参数：
+        item (rag_item): 包含请求内容、模型、会话ID、历史消息等。
+    
+    返回：
+        JSONResponse: {"result": {"answer": str, "material": str}} 或错误信息。
+    
+    异常：
+        处理失败时返回500。
+    """
     try:
         # 如果没有提供session_id则创建新的
         if not item.session_id:
@@ -212,7 +240,21 @@ async def hybridrag(item: rag_item):
 
 @app.post("/hybridrag/stream")
 async def hybridrag_stream(item: rag_item):
-    """处理混合RAG请求并以流式方式返回结果"""
+    """
+    处理混合RAG请求并以流式方式返回结果。
+    
+    用途：
+        支持大模型流式输出，适合前端实时展示生成内容。
+    
+    参数：
+        item (rag_item): 包含请求内容、模型、会话ID、历史消息等。
+    
+    返回：
+        StreamingResponse: SSE流式返回生成内容。
+    
+    异常：
+        处理失败时流中返回error类型消息。
+    """
     # 生成唯一的请求ID
     request_id = str(uuid.uuid4())
 
@@ -437,7 +479,21 @@ async def process_session_queue(session_id: str):
 
 @app.get("/session_status/{session_id}")
 async def get_session_status(session_id: str):
-    """获取会话状态"""
+    """
+    获取会话状态。
+    
+    用途：
+        查询指定session_id的处理状态和队列长度。
+    
+    参数：
+        session_id (str): 会话ID。
+    
+    返回：
+        dict: {"status": str, "queue_length": int}
+    
+    异常：
+        会话不存在时返回404。
+    """
     if session_id not in session_responses:
         return JSONResponse(
             status_code=404,
@@ -454,7 +510,21 @@ async def get_session_status(session_id: str):
 
 @app.delete("/session/{session_id}")
 async def delete_session(session_id: str):
-    """清除会话数据"""
+    """
+    清除会话数据。
+    
+    用途：
+        删除指定session_id的所有队列、事件和响应数据。
+    
+    参数：
+        session_id (str): 会话ID。
+    
+    返回：
+        dict: {"message": str}
+    
+    异常：
+        无
+    """
     if session_id in message_queues:
         del message_queues[session_id]
 
@@ -568,13 +638,13 @@ def process_uploaded_file(original_path: str, filename: str, noteType: str = "ge
         # 根据文件类型选择不同的文本分块器
         if len(simple_files) > 0 and file_ext in simple_files:
             from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
-            kg_manager.splitter = SimpleTextSplitter(2045, 1024)
+            kg_manager.splitter = SimpleTextSplitter(2048, 1024)
         elif len(semantic_files) > 0 and file_ext in semantic_files:
             from TextSlicer.SemanticTextSplitter import SemanticTextSplitter
-            kg_manager.splitter = SemanticTextSplitter(2045, 1024)
+            kg_manager.splitter = SemanticTextSplitter(2048, 1024)
         elif len(character_files) > 0 and file_ext in character_files:
             from TextSlicer.CharacterTextSplitter import CharacterTextSplitter
-            kg_manager.splitter = CharacterTextSplitter(separator="</end>", keep_separator=False, max_tokens=2045, min_tokens=1024)
+            kg_manager.splitter = CharacterTextSplitter(separator="</end>", keep_separator=False, max_tokens=2048, min_tokens=1024)
 
         # 处理知识图谱
         process_knowledge_graph(base_name, text_content, filename, noteType)
@@ -729,13 +799,27 @@ async def upload_file(
     file: UploadFile = File(...),
     noteType: str = Form("general"),
     use_img2txt: str = Form("true"),
-    # 这里的大坑，必须用Form来接收而不是
-    #         noteType: str = "general",
-    #         use_img2txt: str = "true",
-
     background_tasks: BackgroundTasks = None
 ):
-    """支持多种格式的文件上传接口，支持增量更新"""
+    """
+    支持多种格式的文件上传接口，支持增量更新。
+    
+    用途：
+        上传pdf、md、txt等文件，自动转换为文本并生成知识图谱。
+        若文件已存在则自动进行增量更新。
+    
+    参数：
+        file (UploadFile): 上传的文件。
+        noteType (str): 笔记类型，默认为general。
+        use_img2txt (str): 是否启用图片转文本，"true"/"false"。
+        background_tasks (BackgroundTasks): FastAPI后台任务对象。
+    
+    返回：
+        JSONResponse: 包含处理状态、文件名等信息。
+    
+    异常：
+        上传或处理失败时返回500。
+    """
     try:
         # 将字符串类型的use_img2txt参数转换为布尔值
         use_img2txt_bool = use_img2txt == "true"
@@ -809,7 +893,21 @@ async def upload_file(
 
 @app.get("/processing-status/{filename}")
 async def get_processing_status(filename: str):
-    """获取文件处理状态"""
+    """
+    获取文件处理状态。
+    
+    用途：
+        查询指定文件的处理进度和结果文件是否存在。
+    
+    参数：
+        filename (str): 文件名。
+    
+    返回：
+        JSONResponse: {"status": str, "display_status": str, "result_exists": bool, "filename": str}
+    
+    异常：
+        文件不存在时返回404。
+    """
     base_name = os.path.splitext(filename)[0]
     status = PROCESS_STATUS.get(base_name)
 
@@ -841,7 +939,21 @@ async def get_processing_status(filename: str):
 
 @app.get("/file-content/{filename}")
 async def get_file_content(filename: str):
-    """获取转换后的文本内容"""
+    """
+    获取转换后的文本内容。
+    
+    用途：
+        获取指定文件转换后的纯文本内容。
+    
+    参数：
+        filename (str): 文件名。
+    
+    返回：
+        JSONResponse: {"content": str}
+    
+    异常：
+        文件不存在或读取失败时返回404/500。
+    """
     txt_filename = f"{os.path.splitext(filename)[0]}.txt"
     txt_path = os.path.join(TXT_FOLDER, txt_filename)
 
@@ -866,8 +978,22 @@ async def get_file_content(filename: str):
 
 @app.get("/result/{filename}")
 async def get_result(filename: str):
-    """获取处理结果的HTML文件"""
-
+    """
+    获取处理结果的HTML文件。
+    
+    用途：
+        下载或预览知识图谱HTML结果。
+    
+    参数：
+        filename (str): 文件名。
+    
+    返回：
+        FileResponse: HTML文件。
+        JSONResponse: 错误时返回错误信息。
+    
+    异常：
+        结果文件不存在时返回404。
+    """
     base_name = os.path.splitext(filename)[0]
     result_file = f"{base_name}.html"
     result_path = os.path.join(RESULT_FOLDER, result_file)
@@ -896,13 +1022,41 @@ async def get_result(filename: str):
 
 @app.get("/health")
 async def health_check():
-    """健康检查接口"""
+    """
+    健康检查接口。
+    
+    用途：
+        检查服务是否正常运行。
+    
+    参数：
+        无
+    
+    返回：
+        dict: {"status": "healthy", "timestamp": float}
+    
+    异常：
+        无
+    """
     return {"status": "healthy", "timestamp": time.time()}
 
 
 @app.get("/list-files")
 async def list_files():
-    """获取所有已处理文件列表"""
+    """
+    获取所有已处理文件列表。
+    
+    用途：
+        查询所有已上传并处理过的文件及其状态。
+    
+    参数：
+        无
+    
+    返回：
+        JSONResponse: {"files": List[dict]}
+    
+    异常：
+        获取失败时返回500。
+    """
     try:
         # 创建一个专用的storeManager实例来获取文件列表
         file_manager = storeManager(store=chromadb_store, agent=kg_agent)
@@ -966,7 +1120,21 @@ async def list_files():
 
 @app.delete("/delete/{filename}")
 async def delete_file(filename: str):
-    """删除指定文件及其相关数据"""
+    """
+    删除指定文件及其相关数据。
+    
+    用途：
+        删除知识图谱、数据库记录等。
+    
+    参数：
+        filename (str): 文件名。
+    
+    返回：
+        JSONResponse: {"message": str}
+    
+    异常：
+        删除失败时返回500。
+    """
     try:
         base_name = os.path.splitext(filename)[0]
         kg_manager.delete_store([base_name])
@@ -981,7 +1149,21 @@ async def delete_file(filename: str):
 
 @app.delete("/rag-history/{filename}")
 async def delete_rag_history(filename: str):
-    """删除指定文件的RAG对话历史"""
+    """
+    删除指定文件的RAG对话历史。
+    
+    用途：
+        清除RAG历史记录，释放存储空间。
+    
+    参数：
+        filename (str): 文件名。
+    
+    返回：
+        JSONResponse: {"message": str}
+    
+    异常：
+        删除失败时返回500。
+    """
     try:
         base_name = os.path.splitext(filename)[0]
         # 使用chromadb_store删除RAG历史
@@ -999,7 +1181,22 @@ async def delete_rag_history(filename: str):
 
 @app.get("/file-entities/{filename}")
 async def get_file_entities(filename: str, count: int = 5):
-    """获取文件的主要实体"""
+    """
+    获取文件的主要实体。
+    
+    用途：
+        查询知识图谱中最重要的实体节点。
+    
+    参数：
+        filename (str): 文件名。
+        count (int): 返回实体数量，默认5。
+    
+    返回：
+        JSONResponse: {"entities": List[str]}
+    
+    异常：
+        获取失败时返回404/500。
+    """
     try:
         base_name = os.path.splitext(filename)[0]
 
