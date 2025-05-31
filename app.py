@@ -551,6 +551,9 @@ def process_knowledge_graph(base_name: str, text_content: str, original_filename
             # 更新状态为处理中
             PROCESS_STATUS[base_name] = "processing"
 
+            # 新建独立的KgManager实例
+            kg_manager = KgManager(agent=kg_agent, splitter=kg_splitter, embedding_model=embeddings, store=chromadb_store)
+
             # 设置笔记类型
             kg_manager.noteType = noteType
             logger.info(f"设置笔记类型为: {noteType}")
@@ -602,6 +605,9 @@ def process_uploaded_file(original_path: str, filename: str, noteType: str = "ge
         PROCESS_STATUS[base_name] = "processing"
         logger.info(f"开始处理文件: {filename}, 状态已设置为processing")
 
+        # 新建独立的KgManager实例
+        kg_manager = KgManager(agent=kg_agent, splitter=kg_splitter, embedding_model=embeddings, store=chromadb_store)
+
         # 设置原始文件名
         kg_manager.original_file_type = filename  # 使用完整文件名
 
@@ -638,15 +644,15 @@ def process_uploaded_file(original_path: str, filename: str, noteType: str = "ge
         # 根据文件类型选择不同的文本分块器
         if len(simple_files) > 0 and file_ext in simple_files:
             from TextSlicer.SimpleTextSplitter import SimpleTextSplitter
-            kg_manager.splitter = SimpleTextSplitter(2048, 1024)
+            kg_manager.splitter = SimpleTextSplitter(2045, 1024)
         elif len(semantic_files) > 0 and file_ext in semantic_files:
             from TextSlicer.SemanticTextSplitter import SemanticTextSplitter
-            kg_manager.splitter = SemanticTextSplitter(2048, 1024)
+            kg_manager.splitter = SemanticTextSplitter(2045, 1024)
         elif len(character_files) > 0 and file_ext in character_files:
             from TextSlicer.CharacterTextSplitter import CharacterTextSplitter
-            kg_manager.splitter = CharacterTextSplitter(separator="</end>", keep_separator=False, max_tokens=2048, min_tokens=1024)
+            kg_manager.splitter = CharacterTextSplitter(separator="</end>", keep_separator=False, max_tokens=2045, min_tokens=1024)
 
-        # 处理知识图谱
+        # 处理知识图谱（传入独立kg_manager）
         process_knowledge_graph(base_name, text_content, filename, noteType)
 
         # 处理完成后更新状态
@@ -672,6 +678,9 @@ def process_update_file(original_path: str, filename: str, txt_path: str, use_im
         # 在开始处理前将状态设置为updating
         PROCESS_STATUS[base_name] = "updating"
         logger.info(f"开始处理文件更新: {filename}, 状态已设置为updating")
+
+        # 新建独立的KgManager实例
+        kg_manager = KgManager(agent=kg_agent, splitter=kg_splitter, embedding_model=embeddings, store=chromadb_store)
 
         # 设置原始文件名
         kg_manager.original_file_type = filename  # 使用完整文件名
