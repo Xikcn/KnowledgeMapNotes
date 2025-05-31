@@ -2,7 +2,8 @@
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Xikcn/KnowledgeMapNotes)
 
 ## 项目展示
-https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
+https://github.com/user-attachments/assets/5e9e6ffd-4e18-4915-b3a4-85198eb8bb0f
+
 
 ## 项目简介
 本系统通过将PDF等文档自动转化为知识图谱，实现高效的知识管理、智能检索与问答。系统支持关系权重机制、社区智能推荐、知识融合、可视化等多项创新功能，适用于学术笔记、知识管理、智能问答等场景。
@@ -272,6 +273,9 @@ A: 对于大型文档，可以调整SPLITTER_MODE为SemanticTextSplitter获得�
 - **支持qa类型笔记，配合qa笔记工具与对于MCP服务即可使用ai完成知识的整理**
 - **详细可见：https://github.com/Xikcn/QAlite**
 ![img.png](readme_img/img.png)
+
+##### 旧版演示视频
+https://github.com/user-attachments/assets/5b62e85b-1340-4b79-814c-994380a8e146
 
 ## 许可证
 MIT
