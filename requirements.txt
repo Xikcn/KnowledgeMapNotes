@@ -16,3 +16,4 @@ pyvis
 torch
 PyMuPDF
 python-dotenv
+python-multipart
