@@ -47,6 +47,7 @@ class SemanticTextSplitter:
 
         # 预加载模型（单例）
         self.encoder = tiktoken.get_encoding("cl100k_base")
+        # self.semantic_model = SentenceTransformer('bge-base-zh')
         self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
         self.nlp = spacy.load("zh_core_web_sm")
 

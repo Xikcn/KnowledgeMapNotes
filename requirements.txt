@@ -7,7 +7,6 @@ chromadb
 numpy
 transformers
 camelot-py
-fitz
 tqdm
 python-louvain
 networkx
