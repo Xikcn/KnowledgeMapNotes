@@ -91,7 +91,10 @@ class KgManager:
         entity_label = []
         prompt = open(f"./prompt/{prompt_vision}/entity_extraction2.txt", encoding='utf-8').read()
         output = self.Agent.agent_safe_generate_response(prompt, input_parameter)
-        entity_label += output["entities"]
+        if not isinstance(output, dict):
+            entity_label = []
+        else:
+            entity_label = output.get("entities",[])
             # print(output)
         return entity_label
 
@@ -102,7 +105,7 @@ class KgManager:
 
         # print(output2,'output2')
         # 确保从输出中获取正确的relations和weight值
-        if isinstance(output2,int):
+        if not isinstance(output2,dict):
             relations = []
         else:
             relations = output2.get("relations", [])
@@ -160,7 +163,7 @@ class KgManager:
                 print(merged_result, "关系融合")
 
                 # 确保融合后的关系中包含权重
-                if isinstance(merged_result, int):
+                if isinstance(merged_result, dict):
                     merged_result = []
                 else:
                     for rel in merged_result.get('relations', []):
@@ -175,10 +178,13 @@ class KgManager:
 
                 # 将融合后的关系添加到结果中
                 for rel in rel_list:
-                    merged_relations.append({
-                        'bid': rel['bid'],
-                        'relation': merged_result.get('relations', [])  # 使用完整的融合后关系列表
-                    })
+                    if isinstance(rel, dict) and isinstance(merged_result, dict):
+                        merged_relations.append({
+                            'bid': rel['bid'],
+                            'relation': merged_result.get('relations', [])  # 使用完整的融合后关系列表
+                        })
+                    else:
+                        continue
             else:
                 # 对于只有一个关系的实体对，直接保留原关系
                 merged_relations.append({
