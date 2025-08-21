@@ -116,9 +116,37 @@ SPLITTER_MODE=SimpleTextSplitter
 4. 系统会基于文档内容和知识图谱提供回答
 5. 可以调整权重阈值，筛选更重要的知识进行回答
 
-## 安装与使用
+## Docker部署安装
 ### 环境要求
-- Python 3.8+
+- Docker已经启动
+1. 创建并配置`.env`文件
+```bash
+# 复制配置模板（如果存在）或手动创建
+cp .env.docker .env
+
+```
+
+2. 关键配置说明
+   - 必须配置的项: API_KEY、BASE_URL
+   - 如果使用本地模型: 设置IS_USE_LOCAL=True并配置EMBEDDINGS_PATH
+   - 可选的视觉功能: 配置VL_API_KEY和VL_BASE_URL
+
+3. 启动构建
+```bash
+# 启动所有服务
+docker-compose up --build
+
+# 或在后台运行
+docker-compose up -d --build
+
+```
+
+4. 访问前端
+http://localhost:80
+
+## 本地安装与使用
+### 环境要求
+- Python 3.10+
 - Node.js 16+
 - 推荐GPU环境（可选）
 
@@ -172,7 +200,7 @@ pip install -r requirements.txt
 # uv安装依赖
 # uv pip install -r requirements.txt
 # 启动服务
-python app.py
+python main.py
 ```
 
 ### 前端安装
@@ -211,7 +239,7 @@ npm run build
 5. 启动后端服务
 ```bash
 cd ../..
-python app.py
+python main.py
 ```
 
 6. 访问系统

@@ -144,6 +144,45 @@ const fetchKnowledgeGraph = async (filename) => {
   }
 };
 
+// 格式化文本，确保正确显示换行符
+const formatTextWithLineBreaks = (text) => {
+  if (!text) return '';
+  if (Array.isArray(text)) {
+    return text.join('\n');
+  }
+  return text;
+};
+
+// 从localStorage加载聊天历史
+const loadChatHistory = (filename) => {
+  if (!filename) return;
+  
+  try {
+    const savedChat = localStorage.getItem(`chat_${filename}`);
+    if (savedChat) {
+      const parsed = JSON.parse(savedChat);
+      // 确保内容格式正确
+      chatMessages.value = parsed.map(msg => {
+        if (msg.role === 'assistant' && typeof msg.content === 'object') {
+          return {
+            ...msg,
+            content: {
+              answer: formatTextWithLineBreaks(msg.content.answer),
+              material: formatTextWithLineBreaks(msg.content.material)
+            }
+          };
+        }
+        return msg;
+      });
+    } else {
+      chatMessages.value = [];
+    }
+  } catch (error) {
+    console.error('加载聊天历史失败:', error);
+    chatMessages.value = [];
+  }
+};
+
 // 页面加载时获取历史文件列表
 onMounted(async () => {
   try {
@@ -158,7 +197,7 @@ onMounted(async () => {
     // 加载图片文本识别设置
     const savedImg2txtSetting = localStorage.getItem('use-img2txt');
     useImg2txt.value = savedImg2txtSetting === 'true';
-
+    
     const response = await axios.get('http://localhost:8000/list-files');
     if (response.data && Array.isArray(response.data.files)) {
       // 将历史文件添加到文件列表，保持原始文件名和状态
@@ -212,18 +251,7 @@ const deleteFile = async (file) => {
     if (index !== -1) {
       uploadFileList.value.splice(index, 1);
     }
-
-    // 如果删除的是当前查看的文件，先清空当前状态再清理缓存
-    if (currentFile.value && currentFile.value.name === file.name) {
-      // 先清空当前文件状态
-      currentChatFile.value = null;
-      currentFile.value = null;
-      chatMessages.value = [];
-      // 然后关闭结果视图
-      activeView.value = 'upload';
-      knowledgeGraphData.value = null;
-    }
-
+    
     // 清理本地缓存
     localStorage.removeItem(`kg_${file.name}`);  // 删除知识图谱数据
     localStorage.removeItem(`chat_${file.name}`);  // 删除聊天记录
@@ -231,6 +259,11 @@ const deleteFile = async (file) => {
     // 清理聊天状态
     if (fileChatStates.value[file.name]) {
       delete fileChatStates.value[file.name];
+    }
+
+    // 如果删除的是当前查看的文件，关闭结果视图
+    if (currentFile.value && currentFile.value.name === file.name) {
+      closeResultView();
     }
 
     ElMessage.success(`文件 ${file.name} 已删除`);
@@ -243,10 +276,10 @@ const deleteFile = async (file) => {
 };
 
 // 删除RAG历史记录功能
-const deleteRagHistory = async (event, file) => {
+const deleteRagHistory = async (file, event) => {
   // 阻止事件冒泡，防止触发文件查看
   event.stopPropagation();
-
+  
   try {
     // 添加确认弹窗
     await ElMessageBox.confirm(
@@ -261,7 +294,7 @@ const deleteRagHistory = async (event, file) => {
 
     // 调用后端API删除RAG历史
     await axios.delete(`http://localhost:8000/rag-history/${file.name}`);
-
+    
     // 清理本地缓存
     localStorage.removeItem(`chat_${file.name}`);  // 删除本地聊天记录
 
@@ -347,14 +380,19 @@ const processStreamResponse = async (url, data, messageIndex) => {
 
           // 根据不同类型的消息进行处理
           if (eventData.type === 'status') {
-            console.log('Status update:', eventData.content);
             // 在UI上显示当前处理状态
             streamingStatus.value = eventData.content;
           }
           else if (eventData.type === 'content') {
             // 更新聊天内容
             if (messageIndex !== -1 && chatMessages.value[messageIndex]) {
-              chatMessages.value[messageIndex].content.answer = eventData.full;
+              // 确保正确处理换行符
+              let formattedContent = eventData.full;
+              // 如果内容是字符串数组，用换行符连接
+              if (Array.isArray(formattedContent)) {
+                formattedContent = formattedContent.join('\n');
+              }
+              chatMessages.value[messageIndex].content.answer = formattedContent;
 
               // 自动滚动到底部
               if (autoScroll.value) {
@@ -368,10 +406,11 @@ const processStreamResponse = async (url, data, messageIndex) => {
               // 检查响应内容是否为JSON格式
               let finalAnswer = eventData.answer;
               let finalMaterial = eventData.material;
-
+              
               // 使用正则表达式匹配```json和```之间的内容
               const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-
+              
+              
               if (typeof finalAnswer === 'string') {
                 const jsonMatch = finalAnswer.match(jsonRegex);
                 if (jsonMatch && jsonMatch[1]) {
@@ -380,12 +419,12 @@ const processStreamResponse = async (url, data, messageIndex) => {
                     if (jsonContent.answer) {
                       // 如果answer是数组，则将其连接为字符串
                       if (Array.isArray(jsonContent.answer)) {
-                        finalAnswer = jsonContent.answer.join('');
+                        finalAnswer = jsonContent.answer.join('\n');
                       } else {
                         finalAnswer = jsonContent.answer;
                       }
                     }
-
+                    
                     // 检查material是否存在且非空
                     if (jsonContent.material) {
                       if (Array.isArray(jsonContent.material) && jsonContent.material.length > 0) {
@@ -407,12 +446,12 @@ const processStreamResponse = async (url, data, messageIndex) => {
                     const jsonContent = JSON.parse(finalAnswer);
                     if (jsonContent.answer) {
                       if (Array.isArray(jsonContent.answer)) {
-                        finalAnswer = jsonContent.answer.join('');
+                        finalAnswer = jsonContent.answer.join('\n');
                       } else {
                         finalAnswer = jsonContent.answer;
                       }
                     }
-
+                    
                     if (jsonContent.material) {
                       if (Array.isArray(jsonContent.material) && jsonContent.material.length > 0) {
                         finalMaterial = jsonContent.material.join('\n');
@@ -429,7 +468,7 @@ const processStreamResponse = async (url, data, messageIndex) => {
                   }
                 }
               }
-
+              
               // 更新聊天消息
               chatMessages.value[messageIndex].content.answer = finalAnswer;
               if (finalMaterial && finalMaterial.trim() !== '') {
@@ -459,7 +498,7 @@ const processStreamResponse = async (url, data, messageIndex) => {
           }
           else if (eventData.type === 'done') {
             // 处理完成
-            console.log('Stream completed');
+            // console.log('Stream completed');
             streamingStatus.value = '';
             break;
           }
@@ -675,20 +714,20 @@ const closeFileList = () => {
 const beforeUpload = async (file) => {
   // 检查文件是否已存在
   const existingFile = uploadFileList.value.find(item => item.name === file.name);
-
+  
   if (existingFile) {
     // 询问用户是否要覆盖已存在的文件
     try {
       await ElMessageBox.confirm(
-          `文件 "${file.name}" 已存在，是否要进行增量更新？`,
-          '文件已存在',
-          {
-            confirmButtonText: '增量更新',
-            cancelButtonText: '取消上传',
-            type: 'warning',
-          }
+        `文件 "${file.name}" 已存在，是否要进行增量更新？`,
+        '文件已存在',
+        {
+          confirmButtonText: '增量更新',
+          cancelButtonText: '取消上传',
+          type: 'warning',
+        }
       );
-
+      
       // 用户确认更新，修改原文件状态为更新中
       existingFile.status = 'updating';
       existingFile.display_status = '增量更新中';
@@ -700,7 +739,7 @@ const beforeUpload = async (file) => {
       return false;
     }
   }
-
+  
   // 新文件，正常上传
   const fileObj = {
     uid: Date.now(),
@@ -731,23 +770,6 @@ const onUploadSuccess = (response, file) => {
       targetFile.display_status = '增量更新中';
       targetFile.percentage = 100;
       targetFile.resultId = response.resultId || Date.now();
-
-      // 删除浏览器缓存中的图片
-      localStorage.removeItem(`kg_${file.name}`);  // 删除知识图谱数据
-      localStorage.removeItem(`chat_${file.name}`);  // 删除聊天记录
-
-      // 清理聊天状态
-      if (fileChatStates.value[file.name]) {
-        delete fileChatStates.value[file.name];
-      }
-
-      // 如果当前正在查看该文件，清空当前状态
-      if (currentFile.value && currentFile.value.name === file.name) {
-        currentChatFile.value = null;
-        currentFile.value = null;
-        chatMessages.value = [];
-        knowledgeGraphData.value = null;
-      }
     } else {
       // 新文件，修改状态为处理中
       targetFile.status = 'processing';
@@ -802,12 +824,12 @@ const updateFileStatus = async (file) => {
       } else {
         file.display_status = getStatusText(response.data.status);
       }
-
+      
       // 如果文件存在增量更新标记并且状态已变为completed，清除更新标记
       if (file.isUpdate && response.data.status === 'completed') {
         file.isUpdate = false;
       }
-
+      
       return true;
     }
     return false;
@@ -879,22 +901,15 @@ const viewFileResult = async (file) => {
         fileContentLoading.value = false;
       }
 
-      // 从localStorage加载聊天记录
-      const savedChat = localStorage.getItem(`chat_${file.name}`);
-      if (savedChat) {
-        chatMessages.value = JSON.parse(savedChat);
-      } else {
-        // 如果没有保存的聊天记录，创建新的
-        chatMessages.value = [
-        ];
-      }
+      // 使用新函数加载聊天历史记录
+      loadChatHistory(file.name);
 
       // 启用自动滚动
       autoScroll.value = true;
-
+      
       // 不管当前是什么标签，先切换到RAG标签
       activeTab.value = 'rag';
-
+      
       // 使用nextTick确保DOM已更新
       nextTick(() => {
         scrollToBottom();
@@ -907,15 +922,15 @@ const viewFileResult = async (file) => {
     // 处理错误状态的文件，提示用户是否重新构建
     try {
       await ElMessageBox.confirm(
-          `文件 ${file.name} 处理失败，是否重新开始构建知识图谱？`,
-          '重新构建',
-          {
-            confirmButtonText: '确定',
-            cancelButtonText: '取消',
-            type: 'warning',
-          }
+        `文件 ${file.name} 处理失败，是否重新开始构建知识图谱？`,
+        '重新构建',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
       );
-
+      
       // 重新上传文件
       rebuildKnowledgeGraph(file);
     } catch (error) {
@@ -939,7 +954,7 @@ const rebuildKnowledgeGraph = async (file) => {
       targetFile.display_status = '重新上传中';
       targetFile.percentage = 0;
     }
-
+    
     // 使用新的rebuild API端点
     const formData = new FormData();
     formData.append('filename', file.name);
@@ -947,17 +962,17 @@ const rebuildKnowledgeGraph = async (file) => {
     // 显式使用字符串值
     const img2txtValue = useImg2txt.value ? 'true' : 'false';
     formData.append('use_img2txt', img2txtValue);
-
-    // console.log('重建使用的参数:', {
-    //   filename: file.name,
-    //   noteType: noteType.value,
-    //   use_img2txt: img2txtValue,
-    //   useImg2txt原始值: useImg2txt.value
-    // });
-
+    
+    console.log('重建使用的参数:', {
+      filename: file.name,
+      noteType: noteType.value, 
+      use_img2txt: img2txtValue,
+      useImg2txt原始值: useImg2txt.value
+    });
+    
     // 发送重新构建请求
     const response = await axios.post('http://localhost:8000/rebuild', formData);
-
+    
     // 处理响应
     if (response.data) {
       if (targetFile) {
@@ -965,16 +980,16 @@ const rebuildKnowledgeGraph = async (file) => {
         targetFile.display_status = '处理中';
         targetFile.percentage = 100;
       }
-
+      
       // 开始检查处理状态
       checkFileProcessingStatus(targetFile);
-
+      
       ElMessage.success(`文件 ${file.name} 重新构建已开始`);
     }
   } catch (error) {
     console.error('重新构建失败:', error);
     ElMessage.error(`重新构建失败: ${error.message || '未知错误'}`);
-
+    
     // 恢复文件状态为错误
     const targetFile = uploadFileList.value.find(item => item.name === file.name);
     if (targetFile) {
@@ -994,14 +1009,14 @@ const closeResultView = () => {
   }
 
   if (currentChatFile.value) {
-    const chatHistory = chatMessages.value.filter(msg => !msg.thinking);
+    // 过滤掉思考中和流式输出中的消息
+    const chatHistory = chatMessages.value.filter(msg => !msg.thinking && !msg.streaming);
     localStorage.setItem(`chat_${currentChatFile.value}`, JSON.stringify(chatHistory));
   }
   activeView.value = 'upload';
   knowledgeGraphData.value = null;
   currentChatFile.value = null;
-  chatMessages.value = [
-  ];
+  chatMessages.value = [];
 }
 
 // 修改切换面板显示状态的函数
@@ -1095,7 +1110,6 @@ const fileTypeOptions = [
   { value: 'all', label: '全部' },
   { value: 'txt', label: 'TXT' },
   { value: 'pdf', label: 'PDF' },
-  { value: 'md', label: 'MD' },
   { value: 'docx', label: 'WORD' }
 ];
 
@@ -1183,44 +1197,28 @@ const handleCloseAll = () => {
 const currentFileId = ref(null);
 
 // 查看文件内容
-const viewFile = async (file) => {
-  try {
-    if (file.status !== 'completed') {
-      ElMessage.warning(`文件 ${file.name} 正在处理中: ${file.display_status || getStatusText(file.status)}`);
-      return;
-    }
-
-    currentFile.value = file;
-    activeView.value = 'result';
-    activeTab.value = 'original'; // 默认显示原文件
-
-    if (fileListExpand.value && window.innerWidth < 1200) {
-      fileListExpand.value = false;
-    }
-
-    // 加载文件内容
-    await loadFileContent(file);
-
-    // 加载知识图谱
-    await loadKnowledgeGraph(file);
-
-    // 准备文件的聊天状态
-    prepareChatState(file);
-  } catch (error) {
-    console.error('查看文件失败:', error);
-    ElMessage.error('查看文件失败');
-  }
+const viewFile = (file) => {
+  if (!file || !file.name || file.status !== 'completed') return;
+  
+  currentFile.value = file;
+  activeView.value = 'result';
+  activeTab.value = 'original';
+  
+  // 使用新的函数加载聊天历史
+  loadChatHistory(file.name);
+  
+  // ...其他代码
 };
 
 // 准备文件的聊天状态
 const prepareChatState = (file) => {
   // 首先尝试从localStorage加载聊天记录
   const savedChat = localStorage.getItem(`chat_${file.name}`);
-
+  
   if (savedChat) {
     // 如果localStorage中有聊天记录，使用它
     chatMessages.value = JSON.parse(savedChat);
-
+    
     // 同时更新fileChatStates中的记录
     if (!fileChatStates.value[file.name]) {
       fileChatStates.value[file.name] = {
@@ -1241,7 +1239,7 @@ const prepareChatState = (file) => {
         ],
         lastActive: new Date().getTime()
       };
-
+      
       // 更新聊天消息
       chatMessages.value = [...fileChatStates.value[file.name].messages];
     } else {
@@ -1302,7 +1300,7 @@ const onUploadClick = () => {
   const formData = new FormData();
   formData.append('file', uploadRef.value.files[0]);
   formData.append('noteType', noteType.value);
-
+  
   axios.post('/api/upload', formData, {
     onUploadProgress: (e) => {
       onUploadProgress(e, uploadRef.value.files[0]);
@@ -1314,6 +1312,8 @@ const onUploadClick = () => {
   });
 }
 
+// 修改onUploadSuccess函数，处理noteType参数
+// ... existing code ...
 
 // 修改onBeforeUpload函数，添加调试信息
 const onBeforeUpload = async (file) => {
@@ -1322,36 +1322,36 @@ const onBeforeUpload = async (file) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('noteType', noteType.value);
-
+    
     // 使用open/off字符串表示开关状态
     const img2txtValue = useImg2txt.value ? 'open' : 'off';
     formData.append('use_img2txt', img2txtValue);
-
+    
     console.log('上传参数:', {
       file: file.name,
       noteType: noteType.value,
       use_img2txt: img2txtValue
     });
 
-    // // 在上传前先检查文件是否已经存在，如果存在则执行更新操作
-    // const existingFile = uploadFileList.value.find(item => item.name === file.name);
-    //
-    // // 开始上传过程
-    // const response = await axios.post('http://localhost:8000/upload', formData, {
-    //   headers: {
-    //     'Content-Type': 'multipart/form-data'
-    //   },
-    //   onUploadProgress: (progressEvent) => {
-    //     // 计算上传进度
-    //     const percentage = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-    //
-    //     // 更新上传进度
-    //     const uploadingFile = uploadFileList.value.find(item => item.name === file.name);
-    //     if (uploadingFile) {
-    //       uploadingFile.percentage = percentage;
-    //     }
-    //   }
-    // });
+    // 在上传前先检查文件是否已经存在，如果存在则执行更新操作
+    const existingFile = uploadFileList.value.find(item => item.name === file.name);
+    
+    // 开始上传过程
+    const response = await axios.post('http://localhost:8000/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: (progressEvent) => {
+        // 计算上传进度
+        const percentage = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        
+        // 更新上传进度
+        const uploadingFile = uploadFileList.value.find(item => item.name === file.name);
+        if (uploadingFile) {
+          uploadingFile.percentage = percentage;
+        }
+      }
+    });
   } catch (error) {
     console.error('上传文件失败:', error);
     ElMessage.error('上传文件失败');
@@ -1373,7 +1373,6 @@ const onBeforeUpload = async (file) => {
         @closeAll="handleCloseAll"
     />
     <div class="main-content">
-      <!--  抽屉型文件列表   -->
       <el-drawer v-model="fileListExpand" direction="ltr" :modal="false" :show-close="false" :size="280">
         <template #header>
           <div class="drawer-manu-header">
@@ -1386,7 +1385,6 @@ const onBeforeUpload = async (file) => {
         </template>
         <template #default>
           <div v-if="!isSearch" class="query-button">
-            <!--  文件列表筛选框  -->
             <el-popover
                 v-model:visible="filterVisible"
                 :show-arrow="false"
@@ -1433,7 +1431,6 @@ const onBeforeUpload = async (file) => {
             </el-popover>
             <svg-icon icon-name="search" icon-class="search-icon" size="18px" @click="isSearch=true"/>
           </div>
-          <!--  文件搜索过滤  -->
           <div v-else class="search-input">
             <el-input
                 v-model="searchValue"
@@ -1443,7 +1440,6 @@ const onBeforeUpload = async (file) => {
             />
             <el-button link @click="isSearch=false">取消</el-button>
           </div>
-          <!--  文件列表  -->
           <div class="file-list">
             <template v-if="filteredFileList.length > 0">
               <div
@@ -1456,7 +1452,7 @@ const onBeforeUpload = async (file) => {
                   'expanded': sideBarRef?.expandedFileId === file.name
                 }"
               >
-                <div class="file-header"
+                <div class="file-header" 
                      @dblclick="viewFileResult(file)"
                      @click="sideBarRef?.toggleFileExpand(file)"
                      @mouseenter="currentFileId = file.name"
@@ -1466,7 +1462,6 @@ const onBeforeUpload = async (file) => {
                       <component :is="getFileIcon(file.status)" />
                     </el-icon>
                     <div class="file-name-container">
-                      <!-- 文件名提示 -->
                       <el-tooltip
                           :content="file.name"
                           placement="right"
@@ -1475,18 +1470,15 @@ const onBeforeUpload = async (file) => {
                       >
                         <div class="file-name">{{ file.name }}</div>
                       </el-tooltip>
-                      <!-- 进度条 -->
                       <div v-if="file.status === 'uploading'" class="file-progress">
                         <el-progress :percentage="file.percentage" :show-text="false" :stroke-width="2" />
                       </div>
                     </div>
                   </div>
-                  <!-- 文件列表操作（删除） -->
                   <div class="file-actions">
                     <div class="file-status" :class="file.status">
                       {{ file.display_status || getStatusText(file.status) }}
                     </div>
-                    <!-- 过渡动画 -->
                     <transition name="fade">
                       <div v-if="currentFileId === file.name && file.status === 'completed'" class="delete-action">
                         <el-tooltip content="清除RAG历史" placement="top">
@@ -1494,7 +1486,7 @@ const onBeforeUpload = async (file) => {
                               src="@/assets/icons/svg/clear.svg"
                               alt="清除RAG历史"
                               class="clear-icon"
-                              @click.stop="deleteRagHistory($event, file)"
+                              @click.stop="deleteRagHistory(file, $event)"
                           />
                         </el-tooltip>
                         <el-tooltip content="删除文件" placement="top">
@@ -1509,7 +1501,7 @@ const onBeforeUpload = async (file) => {
                     </transition>
                   </div>
                 </div>
-
+                
                 <!-- 展开的实体卡片 -->
                 <div v-if="sideBarRef?.expandedFileId === file.name" class="file-entities-card">
                   <div v-if="sideBarRef?.loadingEntities[file.name]" class="loading-entities">
@@ -1518,22 +1510,22 @@ const onBeforeUpload = async (file) => {
                   </div>
                   <div v-else-if="sideBarRef?.fileEntities[file.name]?.errorMessage" class="entities-error">
                     <el-alert
-                        :title="sideBarRef?.fileEntities[file.name]?.errorMessage"
-                        type="error"
-                        :closable="false"
-                        size="small"
-                        show-icon
+                      :title="sideBarRef?.fileEntities[file.name]?.errorMessage"
+                      type="error"
+                      :closable="false"
+                      size="small"
+                      show-icon
                     />
                   </div>
                   <div v-else-if="sideBarRef?.fileEntities[file.name]?.entities?.length" class="entities-list">
                     <div class="entities-title">主要实体</div>
                     <div class="entities-content">
                       <el-tag
-                          v-for="entity in sideBarRef?.fileEntities[file.name].entities"
-                          :key="entity"
-                          class="entity-tag"
-                          size="small"
-                          effect="plain"
+                        v-for="entity in sideBarRef?.fileEntities[file.name].entities"
+                        :key="entity"
+                        class="entity-tag"
+                        size="small"
+                        effect="plain"
                       >
                         {{ entity }}
                       </el-tag>
@@ -1547,13 +1539,11 @@ const onBeforeUpload = async (file) => {
             </template>
             <el-empty v-else description="暂无文件" />
           </div>
-          <!-- 文件列表分页 -->
           <div class="pagination" v-if="filteredFileList.length > 0">
             <el-pagination :total="filteredFileList.length" size="small" layout="prev, pager, next" background />
           </div>
         </template>
       </el-drawer>
-
       <div class="content" :style="{marginLeft:fileListExpand?'280px':'auto'}">
         <div v-if="activeView === 'upload'" class="upload-view">
           <div class="background"></div>
@@ -1577,8 +1567,8 @@ const onBeforeUpload = async (file) => {
               <div class="upload-text">
                 点击或拖拽上传文件
               </div>
-              <p>支持的文件类型：TXT，PDF，MD(QA)...</p>
-              <p>单个txt不超过 2M</p>
+              <p>支持的文件类型：TXT，PDF...</p>
+              <p>单个txt不超过 5M</p>
               <p>图谱初始构造时间较长，请耐心等待</p>
               <br>
               <br>
@@ -1587,7 +1577,6 @@ const onBeforeUpload = async (file) => {
           </div>
         </div>
 
-        <!-- 文件处理结果内容展示3tab -->
         <div v-if="activeView === 'result'" class="result-view">
           <!-- 顶部导航标签 -->
           <div class="file-tabs">
@@ -1726,13 +1715,13 @@ const onBeforeUpload = async (file) => {
                           <span></span><span></span><span></span>
                         </div>
                         <div v-else-if="message.streaming" class="streaming-content">
-                          <div class="answer">{{ Array.isArray(message.content.answer) ? message.content.answer.join('') : message.content.answer }}</div>
+                          <div class="answer" v-html="Array.isArray(message.content.answer) ? message.content.answer.join('\n') : message.content.answer"></div>
                           <div class="cursor-blink"></div>
                           <div v-if="streamingStatus" class="streaming-status">{{ streamingStatus }}</div>
                         </div>
                         <div v-else>
                           <template v-if="typeof message.content === 'object'">
-                            <div class="answer">{{ Array.isArray(message.content.answer) ? message.content.answer.join('') : message.content.answer }}</div>
+                            <div class="answer" v-html="Array.isArray(message.content.answer) ? message.content.answer.join('\n') : message.content.answer"></div>
                             <div v-if="message.content.material && message.content.material.length > 0" class="material">
                               <div class="material-title">参考资料：</div>
                               <div class="material-content">{{ message.content.material }}</div>
@@ -1745,7 +1734,7 @@ const onBeforeUpload = async (file) => {
                       </div>
                     </div>
                   </div>
-                  <!--  一键到底  -->
+
                   <div
                       v-if="showScrollButton"
                       class="scroll-to-bottom-btn"
@@ -1782,7 +1771,6 @@ const onBeforeUpload = async (file) => {
           </div>
         </div>
 
-        <!-- 主题设置 -->
         <el-popover :show-arrow="false" placement="top-end" popper-class="custom-popover" trigger="hover"
                     :show-after="200" popper-style="width:310px">
           <template #reference>
@@ -1836,7 +1824,6 @@ const onBeforeUpload = async (file) => {
         padding: 12px 16px;
         margin: 0;
         border-bottom: 1px solid var(--el-border-color-lighter);
-        user-select: none; /* 禁止文本选择 */
 
         .drawer-manu-header {
           color: var(--el-text-color-primary);
@@ -1877,7 +1864,6 @@ const onBeforeUpload = async (file) => {
           align-items: center;
           justify-content: space-between;
           margin: 12px 16px;
-          user-select: none; /* 禁止文本选择 */
 
           .filter {
             line-height: 1.5;
@@ -1939,7 +1925,6 @@ const onBeforeUpload = async (file) => {
           flex: 1;
           padding: 0 16px;
           overflow-y: auto;
-          user-select: none; /* 禁止文本选择 */
 
           .file-item {
             display: flex;
@@ -1950,7 +1935,7 @@ const onBeforeUpload = async (file) => {
             transition: all 0.3s ease;
             border-radius: 8px;
             border: 1px solid transparent;
-
+            
             &.expanded {
               background-color: var(--el-fill-color-light);
             }
@@ -1977,7 +1962,7 @@ const onBeforeUpload = async (file) => {
                 border-color: var(--el-color-primary-light-3);
               }
             }
-
+            
             .file-header {
               display: flex;
               align-items: center;
@@ -1985,7 +1970,7 @@ const onBeforeUpload = async (file) => {
               padding: 12px 16px;
               cursor: pointer;
               transition: background-color 0.3s;
-
+              
               .file-actions {
                 display: flex;
                 align-items: center;
@@ -1995,7 +1980,7 @@ const onBeforeUpload = async (file) => {
                   display: flex;
                   align-items: center;
                   gap: 8px;
-
+                  
                   .delete-icon, .clear-icon {
                     cursor: pointer;
                     width: 16px;
@@ -2009,11 +1994,11 @@ const onBeforeUpload = async (file) => {
                       opacity: 1;
                     }
                   }
-
+                  
                   .delete-icon:hover {
                     background-color: var(--el-color-danger-light-9);
                   }
-
+                  
                   .clear-icon:hover {
                     background-color: var(--el-color-warning-light-9);
                   }
@@ -2025,7 +2010,6 @@ const onBeforeUpload = async (file) => {
                 align-items: center;
                 flex: 1;
                 min-width: 0; // 防止子元素溢出
-                user-select: none; /* 禁止文本选择 */
 
                 .file-icon {
                   margin-right: 12px;
@@ -2049,7 +2033,6 @@ const onBeforeUpload = async (file) => {
                 .file-name-container {
                   flex: 1;
                   min-width: 0; // 防止子元素溢出
-                  user-select: none; /* 禁止文本选择 */
 
                   .file-name {
                     white-space: nowrap;
@@ -2059,7 +2042,6 @@ const onBeforeUpload = async (file) => {
                     color: var(--el-text-color-primary);
                     font-weight: 500;
                     max-width: 100%;
-                    user-select: none; /* 禁止文本选择 */
                   }
 
                   .file-progress {
@@ -2072,7 +2054,6 @@ const onBeforeUpload = async (file) => {
                 font-size: 12px;
                 white-space: nowrap;
                 flex-shrink: 0;
-                user-select: none; /* 禁止文本选择 */
 
                 &.uploading, &.processing {
                   color: var(--el-color-primary);
@@ -2087,53 +2068,49 @@ const onBeforeUpload = async (file) => {
                 }
               }
             }
-
+            
             .file-entities-card {
               padding: 12px 16px;
               border-top: 1px dashed var(--el-border-color-light);
               background-color: var(--el-bg-color-page);
-              user-select: none; /* 禁止文本选择 */
               overflow: hidden;
               transition: max-height 0.3s ease-in-out;
-
+              
               .loading-entities {
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 padding: 12px 0;
                 color: var(--el-text-color-secondary);
-
+                
                 .el-icon {
                   margin-right: 8px;
                   font-size: 18px;
                 }
               }
-
+              
               .entities-error {
                 padding: 8px 0;
               }
-
+              
               .entities-title {
                 font-size: 14px;
                 font-weight: 600;
                 margin-bottom: 8px;
                 color: var(--el-text-color-primary);
-                user-select: none; /* 禁止文本选择 */
               }
-
+              
               .entities-content {
                 display: flex;
                 flex-wrap: wrap;
                 gap: 8px;
-                user-select: none; /* 禁止文本选择 */
-
+                
                 .entity-tag {
                   margin-right: 0;
                   cursor: default;
-                  user-select: none; /* 禁止文本选择 */
                 }
               }
-
+              
               .no-entities {
                 padding: 8px 0;
               }
@@ -2264,7 +2241,6 @@ const onBeforeUpload = async (file) => {
           height: 48px;
           border-bottom: 1px solid var(--el-border-color-light);
           background-color: var(--el-bg-color-page);
-          user-select: none; /* 禁止文本选择 */
 
           .file-info {
             min-width: 100px;
@@ -2923,11 +2899,13 @@ const onBeforeUpload = async (file) => {
         .message-content {
           .streaming-content {
             display: flex;
+            align-items: flex-start;
             flex-direction: column;
 
             .answer {
               white-space: pre-wrap;
               word-break: break-word;
+              width: 100%;
             }
 
             .cursor-blink {
@@ -3127,11 +3105,13 @@ const onBeforeUpload = async (file) => {
     .message-content {
       .streaming-content {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
+        flex-direction: column;
 
         .answer {
           white-space: pre-wrap;
           word-break: break-word;
+          width: 100%;
         }
 
         .cursor-blink {
@@ -3171,18 +3151,11 @@ const onBeforeUpload = async (file) => {
   scroll-behavior: smooth;
 }
 
-/* 确保原文件和聊天内容可以选择文本 */
-.panel-content {
-  user-select: text !important; /* 允许文本选择 */
+// 添加以下代码到样式部分的末尾：
+.answer {
+  white-space: pre-wrap !important;
+  word-break: break-word;
+  line-height: 1.6;
+  width: 100%;
 }
-
-.rag-chat-container {
-  user-select: text !important; /* 允许文本选择 */
-}
-
-.original-panel, .chat-panel {
-  user-select: text !important; /* 允许文本选择 */
-}
-
-// ... existing code ...
 </style>
