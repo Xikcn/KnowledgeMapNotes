@@ -9,7 +9,7 @@ export default defineConfig(({mode, command}) => {
         plugins: createVitePlugins(env, command === 'build'),
         server: {
             open: true,
-            port: 80,
+            port: 8080,
             proxy: {
                 '/api': {
                     target: 'http://127.0.0.1:8000',
