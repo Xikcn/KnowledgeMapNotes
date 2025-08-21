@@ -142,7 +142,7 @@ docker-compose up -d --build
 ```
 
 4. 访问前端
-http://localhost:80
+http://localhost:8080
 
 ## 本地安装与使用
 ### 环境要求
@@ -153,6 +153,8 @@ http://localhost:80
 ### 环境配置
 1. 创建并配置`.env`文件
 ```bash
+# 进入后端目录
+cd backend
 # 复制配置模板（如果存在）或手动创建
 cp .env.example .env
 
@@ -195,6 +197,7 @@ embeddings = SentenceTransformer(
 
 ### 后端安装
 ```bash
+# 进入后端目录
 # 安装依赖
 pip install -r requirements.txt
 # uv安装依赖
@@ -206,7 +209,7 @@ python main.py
 ### 前端安装
 ```bash
 # 进入前端目录
-cd projects/vue
+cd frontend
 # 安装依赖
 npm install
 # 启动开发服务器
@@ -216,8 +219,8 @@ npm run dev
 ### 完整部署流程
 1. 克隆仓库
 ```bash
-git clone https://github.com/yourusername/knowledge-map-notes.git
-cd knowledge-map-notes
+git clone https://github.com/Xikcn/KnowledgeMapNotes.git
+cd KnowledgeMapNotes
 ```
 
 2. 安装后端依赖
@@ -227,7 +230,7 @@ pip install -r requirements.txt
 
 3. 安装前端依赖
 ```bash
-cd projects/vue
+cd frontend
 npm install
 ```
 
@@ -238,12 +241,13 @@ npm run build
 
 5. 启动后端服务
 ```bash
-cd ../..
+# 进入后端目录
+cd backend
 python main.py
 ```
 
 6. 访问系统
-浏览器中打开 http://localhost:8000
+浏览器中打开 http://localhost:8080
 
 ## 目录结构
 - `app.py`: 主应用入口
